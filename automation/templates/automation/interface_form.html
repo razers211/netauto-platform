@@ -1,0 +1,271 @@
+{% extends 'automation/base.html' %}
+
+{% block title %}{{ title }} - ZeroConfig Platform{% endblock %}
+
+{% block content %}
+<div class="row">
+    <div class="col-md-10 offset-md-1">
+        <div class="card">
+            <div class="card-header">
+                <h4><i class="bi bi-ethernet"></i> {{ title }}</h4>
+                <p class="mb-0 text-muted">Configure network interfaces on Cisco and Huawei devices</p>
+            </div>
+            <div class="card-body">
+                <form method="post" id="interface-form">
+                    {% csrf_token %}
+                    
+                    <!-- Device Selection -->
+                    <div class="mb-4">
+                        <h5><i class="bi bi-hdd-network"></i> Device Selection</h5>
+                        <div class="mb-3">
+                            <label for="{{ device_form.device.id_for_label }}" class="form-label">{{ device_form.device.label }}</label>
+                            {{ device_form.device }}
+                            {% if device_form.device.errors %}
+                                <div class="text-danger small">{{ device_form.device.errors.0 }}</div>
+                            {% endif %}
+                            <div class="form-text">Select the device to configure</div>
+                        </div>
+                    </div>
+
+                    <hr>
+
+                    <!-- Interface Configuration -->
+                    <div class="mb-4">
+                        <h5><i class="bi bi-ethernet"></i> Interface Configuration</h5>
+                        
+                        <div class="row">
+                            <div class="col-md-6">
+                                <div class="mb-3">
+                                    <label for="{{ form.interface.id_for_label }}" class="form-label">{{ form.interface.label }}</label>
+                                    {{ form.interface }}
+                                    {% if form.interface.errors %}
+                                        <div class="text-danger small">{{ form.interface.errors.0 }}</div>
+                                    {% endif %}
+                                    <div class="form-text">{{ form.interface.help_text|default:"Interface to configure" }}</div>
+                                </div>
+                            </div>
+                            <div class="col-md-6">
+                                <div class="mb-3">
+                                    <label for="{{ form.mode.id_for_label }}" class="form-label">{{ form.mode.label }}</label>
+                                    {{ form.mode }}
+                                    {% if form.mode.errors %}
+                                        <div class="text-danger small">{{ form.mode.errors.0 }}</div>
+                                    {% endif %}
+                                    <div class="form-text">Configuration mode to apply</div>
+                                </div>
+                            </div>
+                        </div>
+                    </div>
+
+                    <!-- Access Port Configuration -->
+                    <div id="access-config" class="configuration-section">
+                        <div class="card bg-light">
+                            <div class="card-header">
+                                <h6><i class="bi bi-diagram-2"></i> Access Port Configuration</h6>
+                            </div>
+                            <div class="card-body">
+                                <div class="row">
+                                    <div class="col-md-6">
+                                        <div class="mb-3">
+                                            <label for="{{ form.vlan_id.id_for_label }}" class="form-label">{{ form.vlan_id.label }}</label>
+                                            {{ form.vlan_id }}
+                                            {% if form.vlan_id.errors %}
+                                                <div class="text-danger small">{{ form.vlan_id.errors.0 }}</div>
+                                            {% endif %}
+                                            <div class="form-text">VLAN ID for access port (1-4094)</div>
+                                        </div>
+                                    </div>
+                                    <div class="col-md-6">
+                                        <div class="alert alert-info mt-2">
+                                            <small>
+                                                <i class="bi bi-info-circle"></i>
+                                                <strong>Access Port:</strong> Carries traffic for a single VLAN. 
+                                                Commonly used for end devices like computers and phones.
+                                            </small>
+                                        </div>
+                                    </div>
+                                </div>
+                            </div>
+                        </div>
+                    </div>
+
+                    <!-- Trunk Port Configuration -->
+                    <div id="trunk-config" class="configuration-section">
+                        <div class="card bg-light">
+                            <div class="card-header">
+                                <h6><i class="bi bi-diagram-3"></i> Trunk Port Configuration</h6>
+                            </div>
+                            <div class="card-body">
+                                <div class="row">
+                                    <div class="col-md-6">
+                                        <div class="mb-3">
+                                            <label for="{{ form.allowed_vlans.id_for_label }}" class="form-label">{{ form.allowed_vlans.label }}</label>
+                                            {{ form.allowed_vlans }}
+                                            {% if form.allowed_vlans.errors %}
+                                                <div class="text-danger small">{{ form.allowed_vlans.errors.0 }}</div>
+                                            {% endif %}
+                                            <div class="form-text">VLAN ranges (e.g., 1-10,20,30-40) or leave empty for all</div>
+                                        </div>
+                                    </div>
+                                    <div class="col-md-6">
+                                        <div class="alert alert-info mt-2">
+                                            <small>
+                                                <i class="bi bi-info-circle"></i>
+                                                <strong>Trunk Port:</strong> Carries traffic for multiple VLANs. 
+                                                Used to connect switches or carry multiple VLAN traffic.
+                                            </small>
+                                        </div>
+                                    </div>
+                                </div>
+                                <div class="row">
+                                    <div class="col-12">
+                                        <h6>Examples:</h6>
+                                        <ul class="small text-muted">
+                                            <li><code>1-10</code> - VLANs 1 through 10</li>
+                                            <li><code>1,5,10</code> - VLANs 1, 5, and 10</li>
+                                            <li><code>1-10,20,30-40</code> - VLANs 1-10, 20, and 30-40</li>
+                                            <li><em>Empty</em> - All VLANs allowed</li>
+                                        </ul>
+                                    </div>
+                                </div>
+                            </div>
+                        </div>
+                    </div>
+
+                    <!-- IP Address Configuration -->
+                    <div id="ip-config" class="configuration-section">
+                        <div class="card bg-light">
+                            <div class="card-header">
+                                <h6><i class="bi bi-router"></i> IP Address Configuration</h6>
+                            </div>
+                            <div class="card-body">
+                                <div class="row">
+                                    <div class="col-md-6">
+                                        <div class="mb-3">
+                                            <label for="{{ form.ip_address.id_for_label }}" class="form-label">{{ form.ip_address.label }}</label>
+                                            {{ form.ip_address }}
+                                            {% if form.ip_address.errors %}
+                                                <div class="text-danger small">{{ form.ip_address.errors.0 }}</div>
+                                            {% endif %}
+                                            <div class="form-text">IPv4 address for the interface</div>
+                                        </div>
+                                    </div>
+                                    <div class="col-md-6">
+                                        <div class="mb-3">
+                                            <label for="{{ form.subnet_mask.id_for_label }}" class="form-label">{{ form.subnet_mask.label }}</label>
+                                            {{ form.subnet_mask }}
+                                            {% if form.subnet_mask.errors %}
+                                                <div class="text-danger small">{{ form.subnet_mask.errors.0 }}</div>
+                                            {% endif %}
+                                            <div class="form-text">Subnet mask (e.g., 255.255.255.0)</div>
+                                        </div>
+                                    </div>
+                                </div>
+                                <div class="row">
+                                    <div class="col-12">
+                                        <div class="alert alert-warning">
+                                            <small>
+                                                <i class="bi bi-exclamation-triangle"></i>
+                                                <strong>Layer 3 Interface:</strong> This configuration creates a routed interface. 
+                                                The interface will operate at Layer 3 and can route traffic between networks.
+                                            </small>
+                                        </div>
+                                    </div>
+                                </div>
+                            </div>
+                        </div>
+                    </div>
+
+                    <div class="d-flex justify-content-between mt-4">
+                        <a href="{% url 'index' %}" class="btn btn-outline-secondary">
+                            <i class="bi bi-arrow-left"></i> Back to Dashboard
+                        </a>
+                        <button type="submit" class="btn btn-primary">
+                            <i class="bi bi-ethernet"></i> Configure Interface
+                        </button>
+                    </div>
+                </form>
+            </div>
+        </div>
+        
+        <!-- Help Section -->
+        <div class="card mt-4">
+            <div class="card-header">
+                <h6><i class="bi bi-info-circle"></i> Interface Configuration Guide</h6>
+            </div>
+            <div class="card-body">
+                <div class="row">
+                    <div class="col-md-4">
+                        <h6>Cisco Interface Names</h6>
+                        <ul class="small">
+                            <li><code>GigabitEthernet0/1</code></li>
+                            <li><code>Gi0/1</code></li>
+                            <li><code>FastEthernet0/1</code></li>
+                            <li><code>Fa0/1</code></li>
+                            <li><code>Ethernet1/1</code> (NX-OS)</li>
+                        </ul>
+                    </div>
+                    <div class="col-md-4">
+                        <h6>Huawei Interface Names</h6>
+                        <ul class="small">
+                            <li><code>GigabitEthernet0/0/1</code></li>
+                            <li><code>Ethernet0/0/1</code></li>
+                            <li><code>10GE1/0/1</code></li>
+                            <li><code>XGigabitEthernet0/0/1</code></li>
+                        </ul>
+                    </div>
+                    <div class="col-md-4">
+                        <h6>Configuration Tips</h6>
+                        <ul class="small">
+                            <li>Verify interface names match device</li>
+                            <li>Access ports for end devices</li>
+                            <li>Trunk ports for switch connections</li>
+                            <li>IP addresses for routing</li>
+                        </ul>
+                    </div>
+                </div>
+            </div>
+        </div>
+    </div>
+</div>
+
+<script>
+document.addEventListener('DOMContentLoaded', function() {
+    // Add Bootstrap form classes
+    const inputs = document.querySelectorAll('input, select, textarea');
+    inputs.forEach(function(input) {
+        input.classList.add('form-control');
+    });
+    
+    // Show/hide configuration sections based on mode selection
+    const modeSelect = document.getElementById('id_mode');
+    const accessConfig = document.getElementById('access-config');
+    const trunkConfig = document.getElementById('trunk-config');
+    const ipConfig = document.getElementById('ip-config');
+    
+    function toggleConfigSections() {
+        const selectedMode = modeSelect.value;
+        
+        // Hide all sections first
+        accessConfig.style.display = 'none';
+        trunkConfig.style.display = 'none';
+        ipConfig.style.display = 'none';
+        
+        // Show relevant section
+        if (selectedMode === 'access') {
+            accessConfig.style.display = 'block';
+        } else if (selectedMode === 'trunk') {
+            trunkConfig.style.display = 'block';
+        } else if (selectedMode === 'ip') {
+            ipConfig.style.display = 'block';
+        }
+    }
+    
+    // Initial toggle
+    toggleConfigSections();
+    
+    // Toggle on change
+    modeSelect.addEventListener('change', toggleConfigSections);
+});
+</script>
+{% endblock %}

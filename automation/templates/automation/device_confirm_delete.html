@@ -1,0 +1,102 @@
+{% extends 'automation/base.html' %}
+
+{% block title %}Delete {{ device.name }} - ZeroConfig Platform{% endblock %}
+
+{% block content %}
+<div class="row justify-content-center">
+    <div class="col-md-8">
+        <div class="card border-danger">
+            <div class="card-header bg-danger text-white">
+                <h4><i class="bi bi-exclamation-triangle"></i> Confirm Device Deletion</h4>
+            </div>
+            <div class="card-body">
+                <div class="alert alert-warning" role="alert">
+                    <i class="bi bi-exclamation-triangle"></i>
+                    <strong>Warning!</strong> This action cannot be undone.
+                </div>
+
+                <p class="lead">Are you sure you want to delete the following device?</p>
+                
+                <div class="card bg-light">
+                    <div class="card-body">
+                        <div class="row">
+                            <div class="col-md-6">
+                                <h5>
+                                    <i class="bi bi-hdd-network"></i> {{ device.name }}
+                                    {% if device.is_active %}
+                                        <span class="badge bg-success">Active</span>
+                                    {% else %}
+                                        <span class="badge bg-secondary">Inactive</span>
+                                    {% endif %}
+                                </h5>
+                                <p class="mb-1"><strong>Host:</strong> <code>{{ device.host }}</code></p>
+                                <p class="mb-1"><strong>Type:</strong> {{ device.get_device_type_display }}</p>
+                                <p class="mb-1"><strong>Username:</strong> <code>{{ device.username }}</code></p>
+                                {% if device.description %}
+                                    <p class="mb-1"><strong>Description:</strong> {{ device.description }}</p>
+                                {% endif %}
+                                <p class="mb-0"><strong>Created:</strong> {{ device.created_at|date:"M d, Y H:i" }}</p>
+                            </div>
+                            <div class="col-md-6">
+                                {% if device.last_connected %}
+                                    <p class="mb-1">
+                                        <strong>Last Connected:</strong><br>
+                                        {{ device.last_connected|date:"M d, Y H:i" }}
+                                        <small class="text-muted">({{ device.last_connected|timesince }} ago)</small>
+                                    </p>
+                                {% endif %}
+                            </div>
+                        </div>
+                    </div>
+                </div>
+
+                <div class="mt-4">
+                    <h6>This will also delete:</h6>
+                    <ul class="text-muted">
+                        <li>All automation tasks associated with this device</li>
+                        <li>Task execution history and results</li>
+                        <li>Device configuration backups</li>
+                        <li>Connection logs and statistics</li>
+                    </ul>
+                </div>
+
+                <hr>
+
+                <form method="post" class="d-inline">
+                    {% csrf_token %}
+                    <div class="d-flex justify-content-between align-items-center">
+                        <a href="{% url 'device_detail' device.id %}" class="btn btn-outline-secondary">
+                            <i class="bi bi-arrow-left"></i> Cancel
+                        </a>
+                        
+                        <div>
+                            <a href="{% url 'device_list' %}" class="btn btn-outline-primary me-2">
+                                <i class="bi bi-list"></i> Back to List
+                            </a>
+                            <button type="submit" class="btn btn-danger">
+                                <i class="bi bi-trash"></i> Yes, Delete Device
+                            </button>
+                        </div>
+                    </div>
+                </form>
+            </div>
+        </div>
+
+        <!-- Safety Notice -->
+        <div class="card mt-4 border-info">
+            <div class="card-header bg-info text-white">
+                <h6><i class="bi bi-info-circle"></i> Safety Notice</h6>
+            </div>
+            <div class="card-body">
+                <p class="mb-2"><strong>Before deleting this device, consider:</strong></p>
+                <ul class="mb-0">
+                    <li>Ensure no critical automation tasks are currently running</li>
+                    <li>Backup any important configuration or task history</li>
+                    <li>Verify that removing this device won't affect network operations</li>
+                    <li>Consider deactivating the device instead of deleting it</li>
+                </ul>
+            </div>
+        </div>
+    </div>
+</div>
+{% endblock %}

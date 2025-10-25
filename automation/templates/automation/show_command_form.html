@@ -1,0 +1,210 @@
+{% extends 'automation/base.html' %}
+
+{% block title %}{{ title }} - ZeroConfig Platform{% endblock %}
+
+{% block content %}
+<div class="row">
+    <div class="col-md-8 offset-md-2">
+        <div class="card">
+            <div class="card-header">
+                <h4><i class="bi bi-eye"></i> {{ title }}</h4>
+                <p class="mb-0 text-muted">Execute {{ command_type|title }} command on network devices</p>
+            </div>
+            <div class="card-body">
+                <form method="post">
+                    {% csrf_token %}
+                    
+                    <div class="mb-4">
+                        <h5><i class="bi bi-hdd-network"></i> Device Selection</h5>
+                        <div class="mb-3">
+                            <label for="{{ device_form.device.id_for_label }}" class="form-label">{{ device_form.device.label }}</label>
+                            {{ device_form.device }}
+                            {% if device_form.device.errors %}
+                                <div class="text-danger small">{{ device_form.device.errors.0 }}</div>
+                            {% endif %}
+                            <div class="form-text">Select the device to query</div>
+                        </div>
+                    </div>
+
+                    <div class="alert alert-info" role="alert">
+                        <i class="bi bi-info-circle"></i>
+                        <strong>Command Information:</strong> 
+                        {% if command_type == 'version' %}
+                            This will execute "show version" (Cisco) or "display version" (Huawei) to retrieve device version information.
+                        {% elif command_type == 'interfaces' %}
+                            This will execute "show ip interface brief" (Cisco) or "display interface brief" (Huawei) to show interface status.
+                        {% elif command_type == 'vlan' %}
+                            This will execute "show vlan brief" (Cisco) or "display vlan" (Huawei) to show VLAN configuration.
+                        {% elif command_type == 'routes' %}
+                            This will execute "show ip route" (Cisco) or "display ip routing-table" (Huawei) to show routing table.
+                        {% elif command_type == 'config' %}
+                            This will execute "show running-config" (Cisco) or "display current-configuration" (Huawei) to backup the configuration.
+                        {% endif %}
+                    </div>
+
+                    <div class="d-flex justify-content-between">
+                        <a href="{% url 'index' %}" class="btn btn-outline-secondary">
+                            <i class="bi bi-arrow-left"></i> Back to Dashboard
+                        </a>
+                        <button type="submit" class="btn btn-primary">
+                            <i class="bi bi-eye"></i> Execute {{ command_type|title }} Command
+                        </button>
+                    </div>
+                </form>
+            </div>
+        </div>
+        
+        <!-- Command Information -->
+        <div class="card mt-4">
+            <div class="card-header">
+                <h6><i class="bi bi-info-circle"></i> Command Details</h6>
+            </div>
+            <div class="card-body">
+                <div class="row">
+                    <div class="col-md-6">
+                        <h6>Cisco Commands</h6>
+                        {% if command_type == 'version' %}
+                            <div class="output-display small">show version</div>
+                            <p class="small text-muted mt-2">Shows device model, IOS version, uptime, memory, and configuration register.</p>
+                        {% elif command_type == 'interfaces' %}
+                            <div class="output-display small">show ip interface brief</div>
+                            <p class="small text-muted mt-2">Shows interface status, IP addresses, and protocol states.</p>
+                        {% elif command_type == 'vlan' %}
+                            <div class="output-display small">show vlan brief</div>
+                            <p class="small text-muted mt-2">Shows VLAN IDs, names, status, and assigned ports.</p>
+                        {% elif command_type == 'routes' %}
+                            <div class="output-display small">show ip route</div>
+                            <p class="small text-muted mt-2">Shows routing table with networks, next hops, and metrics.</p>
+                        {% elif command_type == 'config' %}
+                            <div class="output-display small">show running-config</div>
+                            <p class="small text-muted mt-2">Shows current running configuration of the device.</p>
+                        {% endif %}
+                    </div>
+                    <div class="col-md-6">
+                        <h6>Huawei Commands</h6>
+                        {% if command_type == 'version' %}
+                            <div class="output-display small">display version</div>
+                            <p class="small text-muted mt-2">Shows device model, VRP version, uptime, memory, and system information.</p>
+                        {% elif command_type == 'interfaces' %}
+                            <div class="output-display small">display interface brief</div>
+                            <p class="small text-muted mt-2">Shows interface status, IP addresses, and protocol states.</p>
+                        {% elif command_type == 'vlan' %}
+                            <div class="output-display small">display vlan</div>
+                            <p class="small text-muted mt-2">Shows VLAN IDs, names, status, and port assignments.</p>
+                        {% elif command_type == 'routes' %}
+                            <div class="output-display small">display ip routing-table</div>
+                            <p class="small text-muted mt-2">Shows routing table with destinations, next hops, and preferences.</p>
+                        {% elif command_type == 'config' %}
+                            <div class="output-display small">display current-configuration</div>
+                            <p class="small text-muted mt-2">Shows current running configuration of the device.</p>
+                        {% endif %}
+                    </div>
+                </div>
+
+                <hr>
+
+                <div class="row">
+                    <div class="col-md-12">
+                        <h6>Use Cases</h6>
+                        {% if command_type == 'version' %}
+                            <ul class="small">
+                                <li>Verify device model and software version</li>
+                                <li>Check device uptime and stability</li>
+                                <li>Identify hardware capabilities and memory</li>
+                                <li>Validate firmware compliance</li>
+                            </ul>
+                        {% elif command_type == 'interfaces' %}
+                            <ul class="small">
+                                <li>Monitor interface operational status</li>
+                                <li>Verify IP address assignments</li>
+                                <li>Troubleshoot connectivity issues</li>
+                                <li>Check interface utilization</li>
+                            </ul>
+                        {% elif command_type == 'vlan' %}
+                            <ul class="small">
+                                <li>Audit VLAN configuration</li>
+                                <li>Verify VLAN port assignments</li>
+                                <li>Troubleshoot VLAN connectivity</li>
+                                <li>Document network segmentation</li>
+                            </ul>
+                        {% elif command_type == 'routes' %}
+                            <ul class="small">
+                                <li>Analyze routing paths and metrics</li>
+                                <li>Troubleshoot routing issues</li>
+                                <li>Verify route advertisements</li>
+                                <li>Monitor routing protocol convergence</li>
+                            </ul>
+                        {% elif command_type == 'config' %}
+                            <ul class="small">
+                                <li>Create configuration backups</li>
+                                <li>Document device settings</li>
+                                <li>Compare configuration changes</li>
+                                <li>Prepare for disaster recovery</li>
+                            </ul>
+                        {% endif %}
+                        
+                        <div class="alert alert-success mt-3">
+                            <small>
+                                <i class="bi bi-lightbulb"></i>
+                                <strong>Tip:</strong> Show commands are read-only and safe to execute. 
+                                They provide valuable information for network monitoring and troubleshooting.
+                            </small>
+                        </div>
+                    </div>
+                </div>
+            </div>
+        </div>
+
+        <!-- Quick Actions -->
+        <div class="card mt-4">
+            <div class="card-header">
+                <h6><i class="bi bi-lightning"></i> Other Show Commands</h6>
+            </div>
+            <div class="card-body">
+                <div class="row">
+                    <div class="col-6 col-md-2 mb-2">
+                        <a href="{% url 'show_command' 'version' %}" class="btn btn-outline-primary btn-sm w-100 {% if command_type == 'version' %}active{% endif %}">
+                            <i class="bi bi-info-square"></i><br>
+                            <small>Version</small>
+                        </a>
+                    </div>
+                    <div class="col-6 col-md-2 mb-2">
+                        <a href="{% url 'show_command' 'interfaces' %}" class="btn btn-outline-success btn-sm w-100 {% if command_type == 'interfaces' %}active{% endif %}">
+                            <i class="bi bi-ethernet"></i><br>
+                            <small>Interfaces</small>
+                        </a>
+                    </div>
+                    <div class="col-6 col-md-2 mb-2">
+                        <a href="{% url 'show_command' 'vlan' %}" class="btn btn-outline-info btn-sm w-100 {% if command_type == 'vlan' %}active{% endif %}">
+                            <i class="bi bi-diagram-3"></i><br>
+                            <small>VLANs</small>
+                        </a>
+                    </div>
+                    <div class="col-6 col-md-2 mb-2">
+                        <a href="{% url 'show_command' 'routes' %}" class="btn btn-outline-warning btn-sm w-100 {% if command_type == 'routes' %}active{% endif %}">
+                            <i class="bi bi-signpost"></i><br>
+                            <small>Routes</small>
+                        </a>
+                    </div>
+                    <div class="col-6 col-md-2 mb-2">
+                        <a href="{% url 'show_command' 'config' %}" class="btn btn-outline-secondary btn-sm w-100 {% if command_type == 'config' %}active{% endif %}">
+                            <i class="bi bi-download"></i><br>
+                            <small>Config</small>
+                        </a>
+                    </div>
+                </div>
+            </div>
+        </div>
+    </div>
+</div>
+
+<script>
+// Add Bootstrap form classes
+document.addEventListener('DOMContentLoaded', function() {
+    const inputs = document.querySelectorAll('input, select, textarea');
+    inputs.forEach(function(input) {
+        input.classList.add('form-control');
+    });
+});
+</script>
+{% endblock %}

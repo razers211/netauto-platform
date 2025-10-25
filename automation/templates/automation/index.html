@@ -1,0 +1,285 @@
+{% extends 'automation/base.html' %}
+
+{% block title %}Dashboard - ZeroConfig Platform{% endblock %}
+
+{% block content %}
+<div class="row">
+    <div class="col-md-12">
+        <h1><i class="bi bi-speedometer2"></i> Network Automation Dashboard</h1>
+        <p class="lead">Manage your Cisco and Huawei network devices with ease</p>
+    </div>
+</div>
+
+<div class="row mb-4">
+    <div class="col-md-3">
+        <div class="card bg-primary text-white">
+            <div class="card-body">
+                <div class="d-flex justify-content-between">
+                    <div>
+                        <h4>{{ device_count }}</h4>
+                        <p class="card-text">Total Devices</p>
+                    </div>
+                    <div class="align-self-center">
+                        <i class="bi bi-hdd-network fs-1"></i>
+                    </div>
+                </div>
+            </div>
+        </div>
+    </div>
+    <div class="col-md-3">
+        <div class="card bg-success text-white">
+            <div class="card-body">
+                <div class="d-flex justify-content-between">
+                    <div>
+                        <h4>{{ active_devices }}</h4>
+                        <p class="card-text">Active Devices</p>
+                    </div>
+                    <div class="align-self-center">
+                        <i class="bi bi-check-circle fs-1"></i>
+                    </div>
+                </div>
+            </div>
+        </div>
+    </div>
+    <div class="col-md-3">
+        <div class="card bg-info text-white">
+            <div class="card-body">
+                <div class="d-flex justify-content-between">
+                    <div>
+                        <h4>{{ task_stats.pending }}</h4>
+                        <p class="card-text">Pending Tasks</p>
+                    </div>
+                    <div class="align-self-center">
+                        <i class="bi bi-clock fs-1"></i>
+                    </div>
+                </div>
+            </div>
+        </div>
+    </div>
+    <div class="col-md-3">
+        <div class="card bg-warning text-dark">
+            <div class="card-body">
+                <div class="d-flex justify-content-between">
+                    <div>
+                        <h4>{{ task_stats.running }}</h4>
+                        <p class="card-text">Running Tasks</p>
+                    </div>
+                    <div class="align-self-center">
+                        <i class="bi bi-arrow-clockwise fs-1"></i>
+                    </div>
+                </div>
+            </div>
+        </div>
+    </div>
+</div>
+
+<div class="row">
+    <div class="col-md-6">
+        <div class="card">
+            <div class="card-header">
+                <h5><i class="bi bi-list-task"></i> Recent Tasks</h5>
+            </div>
+            <div class="card-body">
+                {% if recent_tasks %}
+                    <div class="table-responsive">
+                        <table class="table table-sm">
+                            <thead>
+                                <tr>
+                                    <th>Task</th>
+                                    <th>Device</th>
+                                    <th>Status</th>
+                                    <th>Created</th>
+                                </tr>
+                            </thead>
+                            <tbody>
+                                {% for task in recent_tasks %}
+                                <tr>
+                                    <td>
+                                        <a href="{% url 'task_detail' task.id %}" class="text-decoration-none">
+                                            {{ task.get_task_type_display }}
+                                        </a>
+                                    </td>
+                                    <td>
+                                        <a href="{% url 'device_detail' task.device.id %}" class="text-decoration-none">
+                                            {{ task.device.name }}
+                                        </a>
+                                    </td>
+                                    <td>
+                                        {% if task.status == 'completed' %}
+                                            <span class="badge bg-success">{{ task.get_status_display }}</span>
+                                        {% elif task.status == 'failed' %}
+                                            <span class="badge bg-danger">{{ task.get_status_display }}</span>
+                                        {% elif task.status == 'running' %}
+                                            <span class="badge bg-warning">{{ task.get_status_display }}</span>
+                                        {% else %}
+                                            <span class="badge bg-secondary">{{ task.get_status_display }}</span>
+                                        {% endif %}
+                                    </td>
+                                    <td><small>{{ task.created_at|date:"M d, H:i" }}</small></td>
+                                </tr>
+                                {% endfor %}
+                            </tbody>
+                        </table>
+                    </div>
+                    <div class="text-center">
+                        <a href="{% url 'task_list' %}" class="btn btn-outline-primary btn-sm">View All Tasks</a>
+                    </div>
+                {% else %}
+                    <p class="text-muted">No tasks found. Start automating your network!</p>
+                {% endif %}
+            </div>
+        </div>
+    </div>
+    
+    <div class="col-md-6">
+        <div class="card">
+            <div class="card-header">
+                <h5><i class="bi bi-lightning"></i> Quick Actions</h5>
+            </div>
+            <div class="card-body">
+                <div class="row">
+                    <div class="col-6 mb-3">
+                        <a href="{% url 'device_create' %}" class="btn btn-outline-primary w-100">
+                            <i class="bi bi-plus-circle"></i><br>
+                            <small>Add Device</small>
+                        </a>
+                    </div>
+                    <div class="col-6 mb-3">
+                        <a href="{% url 'vlan_create' %}" class="btn btn-outline-success w-100">
+                            <i class="bi bi-diagram-3"></i><br>
+                            <small>Create VLAN</small>
+                        </a>
+                    </div>
+                    <div class="col-6 mb-3">
+                        <a href="{% url 'interface_config' %}" class="btn btn-outline-info w-100">
+                            <i class="bi bi-ethernet"></i><br>
+                            <small>Config Interface</small>
+                        </a>
+                    </div>
+                    <div class="col-6 mb-3">
+                        <a href="{% url 'routing_static' %}" class="btn btn-outline-warning w-100">
+                            <i class="bi bi-signpost"></i><br>
+                            <small>Static Route</small>
+                        </a>
+                    </div>
+                </div>
+                <hr>
+                <h6>Show Commands</h6>
+                <div class="row">
+                    <div class="col-6 mb-2">
+                        <a href="{% url 'show_command' 'version' %}" class="btn btn-outline-secondary btn-sm w-100">Version</a>
+                    </div>
+                    <div class="col-6 mb-2">
+                        <a href="{% url 'show_command' 'interfaces' %}" class="btn btn-outline-secondary btn-sm w-100">Interfaces</a>
+                    </div>
+                </div>
+                <hr>
+                <h6>Advanced BGP Features</h6>
+                <div class="row">
+                    <div class="col-6 mb-2">
+                        <a href="{% url 'bgp_route_reflector' %}" class="btn btn-outline-primary btn-sm w-100">Route Reflector</a>
+                    </div>
+                    <div class="col-6 mb-2">
+                        <a href="{% url 'bgp_confederation' %}" class="btn btn-outline-primary btn-sm w-100">Confederation</a>
+                    </div>
+                    <div class="col-6 mb-2">
+                        <a href="{% url 'bgp_multipath' %}" class="btn btn-outline-primary btn-sm w-100">Multipath</a>
+                    </div>
+                    <div class="col-6 mb-2">
+                        <a href="{% url 'bgp_evpn' %}" class="btn btn-outline-primary btn-sm w-100">BGP EVPN</a>
+                    </div>
+                </div>
+                <hr>
+                <h6>EVPN VXLAN Features</h6>
+                <div class="row">
+                    <div class="col-6 mb-2">
+                        <a href="{% url 'evpn_instance' %}" class="btn btn-outline-success btn-sm w-100">EVPN Instance</a>
+                    </div>
+                    <div class="col-6 mb-2">
+                        <a href="{% url 'vxlan_tunnel' %}" class="btn btn-outline-success btn-sm w-100">VXLAN Tunnel</a>
+                    </div>
+                    <div class="col-6 mb-2">
+                        <a href="{% url 'nve_interface' %}" class="btn btn-outline-success btn-sm w-100">NVE Interface</a>
+                    </div>
+                    <div class="col-6 mb-2">
+                        <a href="{% url 'vxlan_gateway' %}" class="btn btn-outline-success btn-sm w-100">VXLAN Gateway</a>
+                    </div>
+                </div>
+            </div>
+        </div>
+    </div>
+</div>
+
+<div class="row mt-4">
+    <div class="col-md-12">
+        <div class="card">
+            <div class="card-header">
+                <h5><i class="fas fa-project-diagram"></i> Datacenter Fabric Automation</h5>
+            </div>
+            <div class="card-body">
+                <div class="row">
+                    <div class="col-md-3 mb-3">
+                        <a href="{% url 'datacenter_fabric' %}" class="btn btn-outline-info w-100">
+                            <i class="fas fa-network-wired"></i><br>
+                            <small>Deploy Fabric</small>
+                        </a>
+                    </div>
+                    <div class="col-md-3 mb-3">
+                        <a href="{% url 'tenant_network' %}" class="btn btn-outline-success w-100">
+                            <i class="fas fa-layer-group"></i><br>
+                            <small>Tenant Network</small>
+                        </a>
+                    </div>
+                    <div class="col-md-3 mb-3">
+                        <a href="{% url 'external_connectivity' %}" class="btn btn-outline-warning w-100">
+                            <i class="fas fa-globe"></i><br>
+                            <small>External Connectivity</small>
+                        </a>
+                    </div>
+                    <div class="col-md-3 mb-3">
+                        <a href="{% url 'multi_tenant_deployment' %}" class="btn btn-outline-danger w-100">
+                            <i class="fas fa-cubes"></i><br>
+                            <small>Multi-Tenant Deploy</small>
+                        </a>
+                    </div>
+                </div>
+                <div class="alert alert-info mt-3">
+                    <i class="fas fa-info-circle"></i>
+                    <strong>EVPN VXLAN Datacenter:</strong> Automated deployment and management of modern datacenter fabric with Huawei devices.
+                    Supports spine-leaf topology, multi-tenancy, and seamless Layer 2/3 connectivity.
+                </div>
+            </div>
+        </div>
+    </div>
+</div>
+
+<div class="row mt-4">
+    <div class="col-md-12">
+        <div class="card">
+            <div class="card-header">
+                <h5><i class="bi bi-bar-chart"></i> Task Statistics</h5>
+            </div>
+            <div class="card-body">
+                <div class="row text-center">
+                    <div class="col-3">
+                        <h3 class="text-secondary">{{ task_stats.pending }}</h3>
+                        <p>Pending</p>
+                    </div>
+                    <div class="col-3">
+                        <h3 class="text-warning">{{ task_stats.running }}</h3>
+                        <p>Running</p>
+                    </div>
+                    <div class="col-3">
+                        <h3 class="text-success">{{ task_stats.completed }}</h3>
+                        <p>Completed</p>
+                    </div>
+                    <div class="col-3">
+                        <h3 class="text-danger">{{ task_stats.failed }}</h3>
+                        <p>Failed</p>
+                    </div>
+                </div>
+            </div>
+        </div>
+    </div>
+</div>
+{% endblock %}

@@ -1,0 +1,150 @@
+{% extends 'automation/base.html' %}
+{% load static %}
+
+{% block title %}{{ title }} - Network Automation{% endblock %}
+
+{% block content %}
+<div class="container-fluid">
+    <div class="row">
+        <div class="col-md-8 mx-auto">
+            <div class="card">
+                <div class="card-header">
+                    <h4 class="card-title mb-0">
+                        <i class="fas fa-network-wired"></i> {{ title }}
+                    </h4>
+                </div>
+                <div class="card-body">
+                    <form method="post">
+                        {% csrf_token %}
+                        
+                        <!-- Device Selection -->
+                        <div class="mb-4">
+                            <h5 class="text-muted">Device Selection</h5>
+                            <div class="form-group">
+                                <label for="{{ device_form.device.id_for_label }}" class="form-label">Target Device</label>
+                                {{ device_form.device }}
+                                {% if device_form.device.help_text %}
+                                    <small class="form-text text-muted">{{ device_form.device.help_text }}</small>
+                                {% endif %}
+                                {% if device_form.device.errors %}
+                                    <div class="invalid-feedback d-block">
+                                        {{ device_form.device.errors.0 }}
+                                    </div>
+                                {% endif %}
+                            </div>
+                        </div>
+
+                        <hr>
+
+                        <!-- EVPN Instance Configuration -->
+                        <div class="mb-4">
+                            <h5 class="text-muted">EVPN Instance Configuration</h5>
+                            
+                            <div class="row">
+                                <div class="col-md-6">
+                                    <div class="form-group">
+                                        <label for="{{ form.evpn_instance.id_for_label }}" class="form-label">EVPN Instance Name *</label>
+                                        {{ form.evpn_instance }}
+                                        {% if form.evpn_instance.help_text %}
+                                            <small class="form-text text-muted">{{ form.evpn_instance.help_text }}</small>
+                                        {% endif %}
+                                        {% if form.evpn_instance.errors %}
+                                            <div class="invalid-feedback d-block">
+                                                {{ form.evpn_instance.errors.0 }}
+                                            </div>
+                                        {% endif %}
+                                    </div>
+                                </div>
+                                <div class="col-md-6">
+                                    <div class="form-group">
+                                        <label for="{{ form.route_distinguisher.id_for_label }}" class="form-label">Route Distinguisher *</label>
+                                        {{ form.route_distinguisher }}
+                                        {% if form.route_distinguisher.help_text %}
+                                            <small class="form-text text-muted">{{ form.route_distinguisher.help_text }}</small>
+                                        {% endif %}
+                                        {% if form.route_distinguisher.errors %}
+                                            <div class="invalid-feedback d-block">
+                                                {{ form.route_distinguisher.errors.0 }}
+                                            </div>
+                                        {% endif %}
+                                    </div>
+                                </div>
+                            </div>
+
+                            <div class="row">
+                                <div class="col-md-6">
+                                    <div class="form-group">
+                                        <label for="{{ form.export_rt.id_for_label }}" class="form-label">Export Route Target *</label>
+                                        {{ form.export_rt }}
+                                        {% if form.export_rt.help_text %}
+                                            <small class="form-text text-muted">{{ form.export_rt.help_text }}</small>
+                                        {% endif %}
+                                        {% if form.export_rt.errors %}
+                                            <div class="invalid-feedback d-block">
+                                                {{ form.export_rt.errors.0 }}
+                                            </div>
+                                        {% endif %}
+                                    </div>
+                                </div>
+                                <div class="col-md-6">
+                                    <div class="form-group">
+                                        <label for="{{ form.import_rt.id_for_label }}" class="form-label">Import Route Target *</label>
+                                        {{ form.import_rt }}
+                                        {% if form.import_rt.help_text %}
+                                            <small class="form-text text-muted">{{ form.import_rt.help_text }}</small>
+                                        {% endif %}
+                                        {% if form.import_rt.errors %}
+                                            <div class="invalid-feedback d-block">
+                                                {{ form.import_rt.errors.0 }}
+                                            </div>
+                                        {% endif %}
+                                    </div>
+                                </div>
+                            </div>
+                        </div>
+
+                        <div class="form-actions">
+                            <button type="submit" class="btn btn-primary">
+                                <i class="fas fa-plus"></i> Configure EVPN Instance
+                            </button>
+                            <a href="{% url 'index' %}" class="btn btn-secondary">
+                                <i class="fas fa-times"></i> Cancel
+                            </a>
+                        </div>
+                    </form>
+                </div>
+            </div>
+
+            <!-- Information Card -->
+            <div class="card mt-4">
+                <div class="card-header">
+                    <h6 class="card-title mb-0">
+                        <i class="fas fa-info-circle"></i> EVPN Instance Information
+                    </h6>
+                </div>
+                <div class="card-body">
+                    <div class="alert alert-info">
+                        <i class="fas fa-lightbulb"></i>
+                        <strong>EVPN (Ethernet VPN):</strong> A BGP-based control plane technology used for Layer 2 and Layer 3 VPN services. 
+                        EVPN instances define the scope of MAC and IP route distribution between PE devices.
+                    </div>
+                    <div class="row mt-3">
+                        <div class="col-md-6">
+                            <h6 class="text-primary">Route Distinguisher</h6>
+                            <p class="small text-muted">
+                                Uniquely identifies routes from different EVPN instances. Format: ASN:value or IP:value
+                            </p>
+                        </div>
+                        <div class="col-md-6">
+                            <h6 class="text-primary">Route Targets</h6>
+                            <p class="small text-muted">
+                                Control route import/export between EVPN instances. Can be different for import and export policies.
+                            </p>
+                        </div>
+                    </div>
+                </div>
+            </div>
+        </div>
+    </div>
+</div>
+{% endblock %}

@@ -1,0 +1,142 @@
+{% extends 'automation/base.html' %}
+
+{% block title %}Test Device Connectivity - ZeroConfig Platform{% endblock %}
+
+{% block content %}
+<div class="row">
+    <div class="col-md-8 offset-md-2">
+        <div class="card">
+            <div class="card-header">
+                <h4><i class="bi bi-wifi"></i> Test Device Connectivity</h4>
+                <p class="mb-0 text-muted">Verify connection to network devices</p>
+            </div>
+            <div class="card-body">
+                <form method="post">
+                    {% csrf_token %}
+                    <div class="mb-4">
+                        <label for="{{ form.device.id_for_label }}" class="form-label">{{ form.device.label }}</label>
+                        {{ form.device }}
+                        {% if form.device.errors %}
+                            <div class="text-danger small">{{ form.device.errors.0 }}</div>
+                        {% endif %}
+                        <div class="form-text">Select a device to test connectivity</div>
+                    </div>
+
+                    <div class="d-flex justify-content-between">
+                        <a href="{% url 'index' %}" class="btn btn-outline-secondary">
+                            <i class="bi bi-arrow-left"></i> Back to Dashboard
+                        </a>
+                        <button type="submit" class="btn btn-primary">
+                            <i class="bi bi-wifi"></i> Test Connection
+                        </button>
+                    </div>
+                </form>
+            </div>
+        </div>
+
+        {% if device_tested %}
+        <div class="card mt-4">
+            <div class="card-header bg-success text-white">
+                <h5><i class="bi bi-check-circle"></i> Connection Test Results</h5>
+            </div>
+            <div class="card-body">
+                <div class="alert alert-success" role="alert">
+                    <i class="bi bi-check-circle"></i>
+                    <strong>Success!</strong> Successfully connected to <strong>{{ device_tested.name }}</strong> ({{ device_tested.host }})
+                </div>
+
+                <div class="row mb-3">
+                    <div class="col-md-6">
+                        <h6>Device Information</h6>
+                        <ul class="list-unstyled">
+                            <li><strong>Name:</strong> {{ device_tested.name }}</li>
+                            <li><strong>Host:</strong> {{ device_tested.host }}</li>
+                            <li><strong>Type:</strong> {{ device_tested.get_device_type_display }}</li>
+                            <li><strong>Username:</strong> {{ device_tested.username }}</li>
+                            <li><strong>Port:</strong> {{ device_tested.port }}</li>
+                        </ul>
+                    </div>
+                    <div class="col-md-6">
+                        <h6>Test Results</h6>
+                        <ul class="list-unstyled">
+                            <li><i class="bi bi-check-circle text-success"></i> SSH Connection: <span class="text-success">Success</span></li>
+                            <li><i class="bi bi-check-circle text-success"></i> Authentication: <span class="text-success">Success</span></li>
+                            <li><i class="bi bi-check-circle text-success"></i> Command Execution: <span class="text-success">Success</span></li>
+                            <li><i class="bi bi-check-circle text-success"></i> Device Response: <span class="text-success">Normal</span></li>
+                        </ul>
+                    </div>
+                </div>
+
+                {% if test_result %}
+                <div class="mt-3">
+                    <h6>Device Version Information</h6>
+                    <div class="output-display">{{ test_result }}</div>
+                </div>
+                {% endif %}
+
+                <div class="mt-3">
+                    <h6>Quick Actions</h6>
+                    <div class="btn-group" role="group">
+                        <a href="{% url 'device_detail' device_tested.id %}" class="btn btn-outline-primary">
+                            <i class="bi bi-eye"></i> View Device Details
+                        </a>
+                        <a href="{% url 'vlan_create' %}?device={{ device_tested.id }}" class="btn btn-outline-success">
+                            <i class="bi bi-diagram-3"></i> Create VLAN
+                        </a>
+                        <a href="{% url 'interface_config' %}?device={{ device_tested.id }}" class="btn btn-outline-info">
+                            <i class="bi bi-ethernet"></i> Configure Interface
+                        </a>
+                    </div>
+                </div>
+            </div>
+        </div>
+        {% endif %}
+
+        <!-- Help Section -->
+        <div class="card mt-4">
+            <div class="card-header">
+                <h6><i class="bi bi-info-circle"></i> Connection Test Information</h6>
+            </div>
+            <div class="card-body">
+                <div class="row">
+                    <div class="col-md-6">
+                        <h6>What This Test Does</h6>
+                        <ul>
+                            <li>Establishes SSH connection to the device</li>
+                            <li>Authenticates using stored credentials</li>
+                            <li>Executes a simple "show version" command</li>
+                            <li>Verifies device response and connectivity</li>
+                            <li>Updates last connected timestamp</li>
+                        </ul>
+                    </div>
+                    <div class="col-md-6">
+                        <h6>Troubleshooting Connection Issues</h6>
+                        <ul>
+                            <li><strong>Timeout:</strong> Check if device is reachable and SSH is enabled</li>
+                            <li><strong>Authentication Failed:</strong> Verify username and password</li>
+                            <li><strong>Connection Refused:</strong> Check SSH port and firewall settings</li>
+                            <li><strong>Command Failed:</strong> Verify device type is correctly configured</li>
+                        </ul>
+                    </div>
+                </div>
+                
+                <div class="alert alert-info mt-3" role="alert">
+                    <i class="bi bi-lightbulb"></i>
+                    <strong>Tip:</strong> Regular connectivity tests help ensure your automation tasks will run successfully.
+                    Consider testing devices before running critical automation operations.
+                </div>
+            </div>
+        </div>
+    </div>
+</div>
+
+<script>
+// Add Bootstrap form classes
+document.addEventListener('DOMContentLoaded', function() {
+    const inputs = document.querySelectorAll('input, select, textarea');
+    inputs.forEach(function(input) {
+        input.classList.add('form-control');
+    });
+});
+</script>
+{% endblock %}

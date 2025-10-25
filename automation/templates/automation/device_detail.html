@@ -1,0 +1,256 @@
+{% extends 'automation/base.html' %}
+
+{% block title %}{{ device.name }} - ZeroConfig Platform{% endblock %}
+
+{% block content %}
+<div class="d-flex justify-content-between align-items-center mb-4">
+    <div>
+        <h2>
+            <i class="bi bi-hdd-network"></i> {{ device.name }}
+            {% if device.is_active %}
+                <span class="badge bg-success">Active</span>
+            {% else %}
+                <span class="badge bg-danger">Inactive</span>
+            {% endif %}
+        </h2>
+        <p class="text-muted mb-0">{{ device.get_device_type_display }} Device</p>
+    </div>
+    <div class="btn-group" role="group">
+        <a href="{% url 'device_edit' device.id %}" class="btn btn-outline-primary">
+            <i class="bi bi-pencil"></i> Edit
+        </a>
+        <a href="{% url 'device_delete' device.id %}" class="btn btn-outline-danger">
+            <i class="bi bi-trash"></i> Delete
+        </a>
+        <a href="{% url 'device_list' %}" class="btn btn-outline-secondary">
+            <i class="bi bi-arrow-left"></i> Back to List
+        </a>
+    </div>
+</div>
+
+<div class="row">
+    <div class="col-md-6">
+        <!-- Device Information -->
+        <div class="card">
+            <div class="card-header">
+                <h5><i class="bi bi-info-circle"></i> Device Information</h5>
+            </div>
+            <div class="card-body">
+                <table class="table table-borderless">
+                    <tbody>
+                        <tr>
+                            <td><strong>Name:</strong></td>
+                            <td>{{ device.name }}</td>
+                        </tr>
+                        <tr>
+                            <td><strong>Host/IP:</strong></td>
+                            <td>
+                                <code>{{ device.host }}</code>
+                                {% if device.port != 22 %}
+                                    <small class="text-muted">:{{ device.port }}</small>
+                                {% endif %}
+                            </td>
+                        </tr>
+                        <tr>
+                            <td><strong>Device Type:</strong></td>
+                            <td>
+                                <span class="badge bg-secondary">{{ device.get_device_type_display }}</span>
+                            </td>
+                        </tr>
+                        <tr>
+                            <td><strong>Username:</strong></td>
+                            <td><code>{{ device.username }}</code></td>
+                        </tr>
+                        <tr>
+                            <td><strong>SSH Port:</strong></td>
+                            <td>{{ device.port }}</td>
+                        </tr>
+                        <tr>
+                            <td><strong>Status:</strong></td>
+                            <td>
+                                {% if device.is_active %}
+                                    <span class="badge bg-success">Active</span>
+                                {% else %}
+                                    <span class="badge bg-danger">Inactive</span>
+                                {% endif %}
+                            </td>
+                        </tr>
+                        <tr>
+                            <td><strong>Last Connected:</strong></td>
+                            <td>
+                                {% if device.last_connected %}
+                                    {{ device.last_connected|date:"M d, Y H:i" }}
+                                    <small class="text-muted">({{ device.last_connected|timesince }} ago)</small>
+                                {% else %}
+                                    <span class="text-muted">Never connected</span>
+                                {% endif %}
+                            </td>
+                        </tr>
+                        <tr>
+                            <td><strong>Added:</strong></td>
+                            <td>{{ device.created_at|date:"M d, Y H:i" }}</td>
+                        </tr>
+                        {% if device.description %}
+                        <tr>
+                            <td><strong>Description:</strong></td>
+                            <td>{{ device.description }}</td>
+                        </tr>
+                        {% endif %}
+                    </tbody>
+                </table>
+            </div>
+        </div>
+
+        <!-- Quick Actions -->
+        <div class="card mt-4">
+            <div class="card-header">
+                <h5><i class="bi bi-lightning"></i> Quick Actions</h5>
+            </div>
+            <div class="card-body">
+                <div class="row">
+                    <div class="col-6 mb-2">
+                        <form method="post" action="{% url 'device_test' %}" class="d-inline">
+                            {% csrf_token %}
+                            <input type="hidden" name="device" value="{{ device.id }}">
+                            <button type="submit" class="btn btn-outline-primary btn-sm w-100">
+                                <i class="bi bi-wifi"></i> Test Connection
+                            </button>
+                        </form>
+                    </div>
+                    <div class="col-6 mb-2">
+                        <form method="post" action="{% url 'show_command' 'version' %}" class="d-inline">
+                            {% csrf_token %}
+                            <input type="hidden" name="device" value="{{ device.id }}">
+                            <button type="submit" class="btn btn-outline-info btn-sm w-100">
+                                <i class="bi bi-info-square"></i> Show Version
+                            </button>
+                        </form>
+                    </div>
+                    <div class="col-6 mb-2">
+                        <form method="post" action="{% url 'show_command' 'interfaces' %}" class="d-inline">
+                            {% csrf_token %}
+                            <input type="hidden" name="device" value="{{ device.id }}">
+                            <button type="submit" class="btn btn-outline-success btn-sm w-100">
+                                <i class="bi bi-ethernet"></i> Show Interfaces
+                            </button>
+                        </form>
+                    </div>
+                    <div class="col-6 mb-2">
+                        <form method="post" action="{% url 'show_command' 'config' %}" class="d-inline">
+                            {% csrf_token %}
+                            <input type="hidden" name="device" value="{{ device.id }}">
+                            <button type="submit" class="btn btn-outline-warning btn-sm w-100">
+                                <i class="bi bi-download"></i> Backup Config
+                            </button>
+                        </form>
+                    </div>
+                </div>
+            </div>
+        </div>
+    </div>
+
+    <div class="col-md-6">
+        <!-- Recent Tasks -->
+        <div class="card">
+            <div class="card-header d-flex justify-content-between align-items-center">
+                <h5><i class="bi bi-clock-history"></i> Recent Tasks</h5>
+                <a href="{% url 'task_list' %}?device={{ device.id }}" class="btn btn-outline-primary btn-sm">
+                    View All
+                </a>
+            </div>
+            <div class="card-body">
+                {% if recent_tasks %}
+                    <div class="table-responsive">
+                        <table class="table table-sm">
+                            <thead>
+                                <tr>
+                                    <th>Task</th>
+                                    <th>Status</th>
+                                    <th>Created</th>
+                                    <th>Action</th>
+                                </tr>
+                            </thead>
+                            <tbody>
+                                {% for task in recent_tasks %}
+                                <tr>
+                                    <td>
+                                        <strong>{{ task.get_task_type_display }}</strong>
+                                        {% if task.parameters %}
+                                            <br><small class="text-muted">
+                                                {% if task.task_type == 'vlan_create' or task.task_type == 'vlan_delete' %}
+                                                    VLAN {{ task.parameters.vlan_id }}
+                                                {% elif task.task_type == 'interface_config' %}
+                                                    {{ task.parameters.interface }}
+                                                {% endif %}
+                                            </small>
+                                        {% endif %}
+                                    </td>
+                                    <td>
+                                        {% if task.status == 'completed' %}
+                                            <span class="badge bg-success">{{ task.get_status_display }}</span>
+                                        {% elif task.status == 'failed' %}
+                                            <span class="badge bg-danger">{{ task.get_status_display }}</span>
+                                        {% elif task.status == 'running' %}
+                                            <span class="badge bg-warning">{{ task.get_status_display }}</span>
+                                        {% else %}
+                                            <span class="badge bg-secondary">{{ task.get_status_display }}</span>
+                                        {% endif %}
+                                    </td>
+                                    <td>
+                                        <small>{{ task.created_at|date:"M d, H:i" }}</small>
+                                    </td>
+                                    <td>
+                                        <a href="{% url 'task_detail' task.id %}" class="btn btn-outline-primary btn-sm">
+                                            <i class="bi bi-eye"></i>
+                                        </a>
+                                    </td>
+                                </tr>
+                                {% endfor %}
+                            </tbody>
+                        </table>
+                    </div>
+                {% else %}
+                    <div class="text-center text-muted">
+                        <i class="bi bi-clock-history" style="font-size: 2rem;"></i>
+                        <p class="mt-2 mb-0">No tasks executed yet</p>
+                        <small>Run automation tasks to see activity here</small>
+                    </div>
+                {% endif %}
+            </div>
+        </div>
+
+        <!-- Automation Actions -->
+        <div class="card mt-4">
+            <div class="card-header">
+                <h5><i class="bi bi-gear"></i> Automation Actions</h5>
+            </div>
+            <div class="card-body">
+                <div class="row">
+                    <div class="col-12 mb-3">
+                        <h6>VLAN Operations</h6>
+                        <div class="btn-group w-100" role="group">
+                            <a href="{% url 'vlan_create' %}?device={{ device.id }}" class="btn btn-outline-success">
+                                <i class="bi bi-plus-circle"></i> Create VLAN
+                            </a>
+                            <a href="{% url 'vlan_delete' %}?device={{ device.id }}" class="btn btn-outline-danger">
+                                <i class="bi bi-dash-circle"></i> Delete VLAN
+                            </a>
+                        </div>
+                    </div>
+                    <div class="col-12 mb-3">
+                        <h6>Interface & Routing</h6>
+                        <div class="btn-group w-100" role="group">
+                            <a href="{% url 'interface_config' %}?device={{ device.id }}" class="btn btn-outline-primary">
+                                <i class="bi bi-ethernet"></i> Interface
+                            </a>
+                            <a href="{% url 'routing_static' %}?device={{ device.id }}" class="btn btn-outline-info">
+                                <i class="bi bi-signpost"></i> Static Route
+                            </a>
+                        </div>
+                    </div>
+                </div>
+            </div>
+        </div>
+    </div>
+</div>
+{% endblock %}

@@ -1,0 +1,158 @@
+{% extends 'automation/base.html' %}
+{% load static %}
+
+{% block title %}{{ title }} - Network Automation{% endblock %}
+
+{% block content %}
+<div class="container-fluid">
+    <div class="row">
+        <div class="col-md-8 mx-auto">
+            <div class="card">
+                <div class="card-header">
+                    <h4 class="card-title mb-0">
+                        <i class="fas fa-ethernet"></i> {{ title }}
+                    </h4>
+                </div>
+                <div class="card-body">
+                    <form method="post">
+                        {% csrf_token %}
+                        
+                        <!-- Device Selection -->
+                        <div class="mb-4">
+                            <h5 class="text-muted">Device Selection</h5>
+                            <div class="form-group">
+                                <label for="{{ device_form.device.id_for_label }}" class="form-label">Target Device</label>
+                                {{ device_form.device }}
+                                {% if device_form.device.help_text %}
+                                    <small class="form-text text-muted">{{ device_form.device.help_text }}</small>
+                                {% endif %}
+                                {% if device_form.device.errors %}
+                                    <div class="invalid-feedback d-block">
+                                        {{ device_form.device.errors.0 }}
+                                    </div>
+                                {% endif %}
+                            </div>
+                        </div>
+
+                        <hr>
+
+                        <!-- VRF Interface Configuration -->
+                        <div class="mb-4">
+                            <h5 class="text-muted">VRF Interface Assignment</h5>
+                            
+                            <div class="row">
+                                <div class="col-md-6">
+                                    <div class="form-group">
+                                        <label for="{{ form.vrf_name.id_for_label }}" class="form-label">VRF Name *</label>
+                                        {{ form.vrf_name }}
+                                        {% if form.vrf_name.help_text %}
+                                            <small class="form-text text-muted">{{ form.vrf_name.help_text }}</small>
+                                        {% endif %}
+                                        {% if form.vrf_name.errors %}
+                                            <div class="invalid-feedback d-block">
+                                                {{ form.vrf_name.errors.0 }}
+                                            </div>
+                                        {% endif %}
+                                    </div>
+                                </div>
+                                <div class="col-md-6">
+                                    <div class="form-group">
+                                        <label for="{{ form.interface.id_for_label }}" class="form-label">Interface *</label>
+                                        {{ form.interface }}
+                                        {% if form.interface.help_text %}
+                                            <small class="form-text text-muted">{{ form.interface.help_text }}</small>
+                                        {% endif %}
+                                        {% if form.interface.errors %}
+                                            <div class="invalid-feedback d-block">
+                                                {{ form.interface.errors.0 }}
+                                            </div>
+                                        {% endif %}
+                                    </div>
+                                </div>
+                            </div>
+                        </div>
+
+                        <!-- IP Configuration (Optional) -->
+                        <div class="mb-4">
+                            <h5 class="text-muted">IP Configuration (Optional)</h5>
+                            <p class="text-muted small">
+                                <i class="fas fa-info-circle"></i> 
+                                If specified, the interface will be configured with the provided IP address and subnet mask.
+                            </p>
+                            
+                            <div class="row">
+                                <div class="col-md-6">
+                                    <div class="form-group">
+                                        <label for="{{ form.ip_address.id_for_label }}" class="form-label">IP Address</label>
+                                        {{ form.ip_address }}
+                                        {% if form.ip_address.help_text %}
+                                            <small class="form-text text-muted">{{ form.ip_address.help_text }}</small>
+                                        {% endif %}
+                                        {% if form.ip_address.errors %}
+                                            <div class="invalid-feedback d-block">
+                                                {{ form.ip_address.errors.0 }}
+                                            </div>
+                                        {% endif %}
+                                    </div>
+                                </div>
+                                <div class="col-md-6">
+                                    <div class="form-group">
+                                        <label for="{{ form.subnet_mask.id_for_label }}" class="form-label">Subnet Mask</label>
+                                        {{ form.subnet_mask }}
+                                        {% if form.subnet_mask.help_text %}
+                                            <small class="form-text text-muted">{{ form.subnet_mask.help_text }}</small>
+                                        {% endif %}
+                                        {% if form.subnet_mask.errors %}
+                                            <div class="invalid-feedback d-block">
+                                                {{ form.subnet_mask.errors.0 }}
+                                            </div>
+                                        {% endif %}
+                                    </div>
+                                </div>
+                            </div>
+                        </div>
+
+                        <div class="form-actions">
+                            <button type="submit" class="btn btn-primary">
+                                <i class="fas fa-link"></i> Assign VRF to Interface
+                            </button>
+                            <a href="{% url 'index' %}" class="btn btn-secondary">
+                                <i class="fas fa-times"></i> Cancel
+                            </a>
+                        </div>
+                    </form>
+                </div>
+            </div>
+
+            <!-- Information Card -->
+            <div class="card mt-4">
+                <div class="card-header">
+                    <h6 class="card-title mb-0">
+                        <i class="fas fa-info-circle"></i> VRF Interface Assignment Information
+                    </h6>
+                </div>
+                <div class="card-body">
+                    <div class="row">
+                        <div class="col-md-6">
+                            <h6 class="text-primary">Interface Selection</h6>
+                            <p class="small text-muted">
+                                The interface dropdown is populated automatically from the selected device.
+                                If interfaces don't appear, ensure the device is reachable and has proper credentials configured.
+                            </p>
+                        </div>
+                        <div class="col-md-6">
+                            <h6 class="text-primary">VRF Assignment Effects</h6>
+                            <p class="small text-muted">
+                                Assigning an interface to a VRF will:
+                                <br>• Move the interface to the VRF routing table
+                                <br>• Remove any existing IP configuration
+                                <br>• Apply the new IP configuration if provided
+                            </p>
+                        </div>
+                    </div>
+                </div>
+            </div>
+        </div>
+    </div>
+</div>
+{% endblock %}

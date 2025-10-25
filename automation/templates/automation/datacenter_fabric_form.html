@@ -1,0 +1,186 @@
+{% extends 'automation/base.html' %}
+{% load static %}
+
+{% block title %}{{ title }} - Network Automation{% endblock %}
+
+{% block content %}
+<div class="container-fluid">
+    <div class="row">
+        <div class="col-md-10 mx-auto">
+            <div class="card">
+                <div class="card-header">
+                    <h4 class="card-title mb-0">
+                        <i class="fas fa-project-diagram"></i> {{ title }}
+                    </h4>
+                </div>
+                <div class="card-body">
+                    <form method="post">
+                        {% csrf_token %}
+                        
+                        <!-- Device Selection -->
+                        <div class="mb-4">
+                            <h5 class="text-muted">Device Selection</h5>
+                            <div class="form-group">
+                                <label for="{{ device_form.device.id_for_label }}" class="form-label">Target Device</label>
+                                {{ device_form.device }}
+                                {% if device_form.device.help_text %}
+                                    <small class="form-text text-muted">{{ device_form.device.help_text }}</small>
+                                {% endif %}
+                                {% if device_form.device.errors %}
+                                    <div class="invalid-feedback d-block">
+                                        {{ device_form.device.errors.0 }}
+                                    </div>
+                                {% endif %}
+                            </div>
+                        </div>
+
+                        <hr>
+
+                        <!-- Datacenter Fabric Configuration -->
+                        <div class="mb-4">
+                            <h5 class="text-muted">Datacenter Fabric Configuration</h5>
+                            
+                            <div class="row">
+                                <div class="col-md-4">
+                                    <div class="form-group">
+                                        <label for="{{ form.device_role.id_for_label }}" class="form-label">Device Role *</label>
+                                        {{ form.device_role }}
+                                        {% if form.device_role.help_text %}
+                                            <small class="form-text text-muted">{{ form.device_role.help_text }}</small>
+                                        {% endif %}
+                                        {% if form.device_role.errors %}
+                                            <div class="invalid-feedback d-block">
+                                                {{ form.device_role.errors.0 }}
+                                            </div>
+                                        {% endif %}
+                                    </div>
+                                </div>
+                                <div class="col-md-4">
+                                    <div class="form-group">
+                                        <label for="{{ form.device_id.id_for_label }}" class="form-label">Device ID *</label>
+                                        {{ form.device_id }}
+                                        {% if form.device_id.help_text %}
+                                            <small class="form-text text-muted">{{ form.device_id.help_text }}</small>
+                                        {% endif %}
+                                        {% if form.device_id.errors %}
+                                            <div class="invalid-feedback d-block">
+                                                {{ form.device_id.errors.0 }}
+                                            </div>
+                                        {% endif %}
+                                    </div>
+                                </div>
+                                <div class="col-md-4">
+                                    <div class="form-group">
+                                        <label for="{{ form.as_number.id_for_label }}" class="form-label">BGP AS Number *</label>
+                                        {{ form.as_number }}
+                                        {% if form.as_number.help_text %}
+                                            <small class="form-text text-muted">{{ form.as_number.help_text }}</small>
+                                        {% endif %}
+                                        {% if form.as_number.errors %}
+                                            <div class="invalid-feedback d-block">
+                                                {{ form.as_number.errors.0 }}
+                                            </div>
+                                        {% endif %}
+                                    </div>
+                                </div>
+                            </div>
+
+                            <div class="row">
+                                <div class="col-md-6">
+                                    <div class="form-group">
+                                        <label for="{{ form.loopback_ip.id_for_label }}" class="form-label">Loopback IP</label>
+                                        {{ form.loopback_ip }}
+                                        {% if form.loopback_ip.help_text %}
+                                            <small class="form-text text-muted">{{ form.loopback_ip.help_text }}</small>
+                                        {% endif %}
+                                        {% if form.loopback_ip.errors %}
+                                            <div class="invalid-feedback d-block">
+                                                {{ form.loopback_ip.errors.0 }}
+                                            </div>
+                                        {% endif %}
+                                    </div>
+                                </div>
+                                <div class="col-md-6">
+                                    <div class="form-group">
+                                        <label for="{{ form.underlay_ip_range.id_for_label }}" class="form-label">Underlay IP Range *</label>
+                                        {{ form.underlay_ip_range }}
+                                        {% if form.underlay_ip_range.help_text %}
+                                            <small class="form-text text-muted">{{ form.underlay_ip_range.help_text }}</small>
+                                        {% endif %}
+                                        {% if form.underlay_ip_range.errors %}
+                                            <div class="invalid-feedback d-block">
+                                                {{ form.underlay_ip_range.errors.0 }}
+                                            </div>
+                                        {% endif %}
+                                    </div>
+                                </div>
+                            </div>
+
+                            <div class="form-group">
+                                <label for="{{ form.spine_interfaces.id_for_label }}" class="form-label">Spine/Leaf Interfaces</label>
+                                {{ form.spine_interfaces }}
+                                {% if form.spine_interfaces.help_text %}
+                                    <small class="form-text text-muted">{{ form.spine_interfaces.help_text }}</small>
+                                {% endif %}
+                                {% if form.spine_interfaces.errors %}
+                                    <div class="invalid-feedback d-block">
+                                        {{ form.spine_interfaces.errors.0 }}
+                                    </div>
+                                {% endif %}
+                            </div>
+                        </div>
+
+                        <div class="form-actions">
+                            <button type="submit" class="btn btn-primary">
+                                <i class="fas fa-play"></i> Deploy Datacenter Fabric
+                            </button>
+                            <a href="{% url 'index' %}" class="btn btn-secondary">
+                                <i class="fas fa-times"></i> Cancel
+                            </a>
+                        </div>
+                    </form>
+                </div>
+            </div>
+
+            <!-- Information Card -->
+            <div class="card mt-4">
+                <div class="card-header">
+                    <h6 class="card-title mb-0">
+                        <i class="fas fa-info-circle"></i> Datacenter Fabric Information
+                    </h6>
+                </div>
+                <div class="card-body">
+                    <div class="alert alert-info">
+                        <i class="fas fa-lightbulb"></i>
+                        <strong>EVPN VXLAN Datacenter Fabric:</strong> Automated deployment of spine-leaf architecture with EVPN control plane and VXLAN data plane. 
+                        This creates a scalable, multi-tenant datacenter network with seamless Layer 2/3 connectivity.
+                    </div>
+                    <div class="row mt-3">
+                        <div class="col-md-4">
+                            <h6 class="text-primary">Spine Switch</h6>
+                            <p class="small text-muted">
+                                Acts as the underlay core, providing IP connectivity between leaf switches. 
+                                Runs OSPF for underlay and BGP EVPN for overlay.
+                            </p>
+                        </div>
+                        <div class="col-md-4">
+                            <h6 class="text-primary">Leaf Switch</h6>
+                            <p class="small text-muted">
+                                Connects to servers and provides VXLAN tunneling. 
+                                Acts as VTEP (VXLAN Tunnel Endpoint) and BGP EVPN PE.
+                            </p>
+                        </div>
+                        <div class="col-md-4">
+                            <h6 class="text-primary">Border Leaf</h6>
+                            <p class="small text-muted">
+                                Provides external connectivity to WAN/DCI networks. 
+                                Performs EVPN-to-IP routing for tenant traffic.
+                            </p>
+                        </div>
+                    </div>
+                </div>
+            </div>
+        </div>
+    </div>
+</div>
+{% endblock %}

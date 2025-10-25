@@ -1,0 +1,258 @@
+{% extends 'automation/base.html' %}
+
+{% block title %}{{ title }} - ZeroConfig Platform{% endblock %}
+
+{% block content %}
+<div class="row">
+    <div class="col-md-10 offset-md-1">
+        <div class="card">
+            <div class="card-header">
+                <h4><i class="bi bi-diagram-3-fill"></i> {{ title }}</h4>
+                <p class="mb-0 text-muted">Configure OSPF routing protocol on network devices</p>
+            </div>
+            <div class="card-body">
+                <form method="post">
+                    {% csrf_token %}
+                    
+                    <!-- Device Selection -->
+                    <div class="mb-4">
+                        <h5><i class="bi bi-hdd-network"></i> Device Selection</h5>
+                        <div class="mb-3">
+                            <label for="{{ device_form.device.id_for_label }}" class="form-label">{{ device_form.device.label }}</label>
+                            {{ device_form.device }}
+                            {% if device_form.device.errors %}
+                                <div class="text-danger small">{{ device_form.device.errors.0 }}</div>
+                            {% endif %}
+                            <div class="form-text">Select the device to configure</div>
+                        </div>
+                    </div>
+
+                    <hr>
+
+                    <!-- OSPF Configuration -->
+                    <div class="mb-4">
+                        <h5><i class="bi bi-diagram-3-fill"></i> OSPF Configuration</h5>
+                        
+                        <div class="row">
+                            <div class="col-md-4">
+                                <div class="mb-3">
+                                    <label for="{{ form.process_id.id_for_label }}" class="form-label">{{ form.process_id.label }}</label>
+                                    {{ form.process_id }}
+                                    {% if form.process_id.errors %}
+                                        <div class="text-danger small">{{ form.process_id.errors.0 }}</div>
+                                    {% endif %}
+                                    <div class="form-text">OSPF process ID (1-65535)</div>
+                                </div>
+                            </div>
+                            <div class="col-md-4">
+                                <div class="mb-3">
+                                    <label for="{{ form.router_id.id_for_label }}" class="form-label">{{ form.router_id.label }}</label>
+                                    {{ form.router_id }}
+                                    {% if form.router_id.errors %}
+                                        <div class="text-danger small">{{ form.router_id.errors.0 }}</div>
+                                    {% endif %}
+                                    <div class="form-text">Unique router identifier</div>
+                                </div>
+                            </div>
+                            <div class="col-md-4">
+                                <div class="mb-3">
+                                    <label for="{{ form.vrf_name.id_for_label }}" class="form-label">{{ form.vrf_name.label }}</label>
+                                    {{ form.vrf_name }}
+                                    {% if form.vrf_name.errors %}
+                                        <div class="text-danger small">{{ form.vrf_name.errors.0 }}</div>
+                                    {% endif %}
+                                    <div class="form-text">{{ form.vrf_name.help_text }}</div>
+                                </div>
+                            </div>
+                        </div>
+
+                        <div class="mb-3">
+                            <label for="{{ form.networks.id_for_label }}" class="form-label">{{ form.networks.label }}</label>
+                            {{ form.networks }}
+                            {% if form.networks.errors %}
+                                <div class="text-danger small">{{ form.networks.errors.0 }}</div>
+                            {% endif %}
+                            <div class="form-text">Network configurations in JSON format</div>
+                        </div>
+                    </div>
+
+                    <div class="alert alert-info" role="alert">
+                        <i class="bi bi-info-circle"></i>
+                        <strong>OSPF Configuration:</strong> This will enable OSPF routing protocol with the specified process ID, 
+                        router ID, and network advertisements. OSPF automatically discovers neighbors and builds the routing table.
+                    </div>
+
+                    <div class="d-flex justify-content-between">
+                        <a href="{% url 'index' %}" class="btn btn-outline-secondary">
+                            <i class="bi bi-arrow-left"></i> Back to Dashboard
+                        </a>
+                        <button type="submit" class="btn btn-primary">
+                            <i class="bi bi-diagram-3-fill"></i> Configure OSPF
+                        </button>
+                    </div>
+                </form>
+            </div>
+        </div>
+        
+        <!-- Help Section -->
+        <div class="card mt-4">
+            <div class="card-header">
+                <h6><i class="bi bi-info-circle"></i> OSPF Configuration Guide</h6>
+            </div>
+            <div class="card-body">
+                <div class="row">
+                    <div class="col-md-6">
+                        <h6>Network Configuration Format</h6>
+                        <p>Enter networks in JSON format:</p>
+                        <div class="output-display small">
+[
+  {
+    "network": "192.168.1.0",
+    "wildcard": "0.0.0.255",
+    "area": "0"
+  },
+  {
+    "network": "10.0.0.0",
+    "wildcard": "0.0.0.3",
+    "area": "1"
+  }
+]</div>
+                    </div>
+                    <div class="col-md-6">
+                        <h6>OSPF Parameters</h6>
+                        <table class="table table-sm">
+                            <tbody>
+                                <tr>
+                                    <td><strong>Process ID:</strong></td>
+                                    <td>Local identifier (1-65535)</td>
+                                </tr>
+                                <tr>
+                                    <td><strong>Router ID:</strong></td>
+                                    <td>Unique identifier (IP format)</td>
+                                </tr>
+                                <tr>
+                                    <td><strong>Network:</strong></td>
+                                    <td>Network to advertise</td>
+                                </tr>
+                                <tr>
+                                    <td><strong>Wildcard:</strong></td>
+                                    <td>Inverse subnet mask</td>
+                                </tr>
+                                <tr>
+                                    <td><strong>Area:</strong></td>
+                                    <td>OSPF area (0 = backbone)</td>
+                                </tr>
+                            </tbody>
+                        </table>
+                    </div>
+                </div>
+                
+                <hr>
+                
+                <div class="row">
+                    <div class="col-md-6">
+                        <h6>Wildcard Mask Examples</h6>
+                        <table class="table table-sm">
+                            <thead>
+                                <tr>
+                                    <th>Subnet Mask</th>
+                                    <th>Wildcard Mask</th>
+                                    <th>Usage</th>
+                                </tr>
+                            </thead>
+                            <tbody>
+                                <tr>
+                                    <td><code>255.255.255.255</code></td>
+                                    <td><code>0.0.0.0</code></td>
+                                    <td>Host route</td>
+                                </tr>
+                                <tr>
+                                    <td><code>255.255.255.252</code></td>
+                                    <td><code>0.0.0.3</code></td>
+                                    <td>Point-to-point</td>
+                                </tr>
+                                <tr>
+                                    <td><code>255.255.255.0</code></td>
+                                    <td><code>0.0.0.255</code></td>
+                                    <td>/24 network</td>
+                                </tr>
+                                <tr>
+                                    <td><code>255.255.0.0</code></td>
+                                    <td><code>0.0.255.255</code></td>
+                                    <td>/16 network</td>
+                                </tr>
+                            </tbody>
+                        </table>
+                    </div>
+                    <div class="col-md-6">
+                        <h6>OSPF Areas</h6>
+                        <ul>
+                            <li><strong>Area 0:</strong> Backbone area (required)</li>
+                            <li><strong>Standard Areas:</strong> Full LSA database</li>
+                            <li><strong>Stub Areas:</strong> No external LSAs</li>
+                            <li><strong>NSSA:</strong> Not-So-Stubby Area</li>
+                        </ul>
+                        
+                        <div class="alert alert-warning mt-3">
+                            <small>
+                                <i class="bi bi-exclamation-triangle"></i>
+                                <strong>Important:</strong> All non-backbone areas must connect to Area 0.
+                                Router ID should be unique across the OSPF domain.
+                            </small>
+                        </div>
+                    </div>
+                </div>
+                
+                <hr>
+                
+                <div class="row">
+                    <div class="col-md-6">
+                        <h6>Cisco OSPF Commands Generated</h6>
+                        <div class="output-display small">
+router ospf 1
+router-id 1.1.1.1
+network 192.168.1.0 0.0.0.255 area 0
+network 10.0.0.0 0.0.0.3 area 1</div>
+                    </div>
+                    <div class="col-md-6">
+                        <h6>Huawei OSPF Commands Generated</h6>
+                        <div class="output-display small">
+ospf 1 router-id 1.1.1.1
+area 0
+network 192.168.1.0 0.0.0.255
+quit
+area 1
+network 10.0.0.0 0.0.0.3
+quit
+quit</div>
+                    </div>
+                </div>
+            </div>
+        </div>
+    </div>
+</div>
+
+<script>
+// Add Bootstrap form classes
+document.addEventListener('DOMContentLoaded', function() {
+    const inputs = document.querySelectorAll('input, select, textarea');
+    inputs.forEach(function(input) {
+        input.classList.add('form-control');
+    });
+    
+    // Auto-fill example networks
+    const networksTextarea = document.getElementById('id_networks');
+    if (networksTextarea && !networksTextarea.value.trim()) {
+        const exampleNetworks = JSON.stringify([
+            {
+                "network": "192.168.1.0",
+                "wildcard": "0.0.0.255",
+                "area": "0"
+            }
+        ], null, 2);
+        
+        networksTextarea.placeholder = 'Example:\n' + exampleNetworks;
+    }
+});
+</script>
+{% endblock %}

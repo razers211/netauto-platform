@@ -1,0 +1,158 @@
+{% extends 'automation/base.html' %}
+{% load static %}
+
+{% block title %}{{ title }} - Network Automation{% endblock %}
+
+{% block content %}
+<div class="container-fluid">
+    <div class="row">
+        <div class="col-md-8 mx-auto">
+            <div class="card">
+                <div class="card-header">
+                    <h4 class="card-title mb-0">
+                        <i class="fas fa-broadcast-tower"></i> {{ title }}
+                    </h4>
+                </div>
+                <div class="card-body">
+                    <form method="post">
+                        {% csrf_token %}
+                        
+                        <!-- Device Selection -->
+                        <div class="mb-4">
+                            <h5 class="text-muted">Device Selection</h5>
+                            <div class="form-group">
+                                <label for="{{ device_form.device.id_for_label }}" class="form-label">Target Device</label>
+                                {{ device_form.device }}
+                                {% if device_form.device.help_text %}
+                                    <small class="form-text text-muted">{{ device_form.device.help_text }}</small>
+                                {% endif %}
+                                {% if device_form.device.errors %}
+                                    <div class="invalid-feedback d-block">
+                                        {{ device_form.device.errors.0 }}
+                                    </div>
+                                {% endif %}
+                            </div>
+                        </div>
+
+                        <hr>
+
+                        <!-- BGP Network Configuration -->
+                        <div class="mb-4">
+                            <h5 class="text-muted">BGP Network Advertisement</h5>
+                            
+                            <div class="row">
+                                <div class="col-md-6">
+                                    <div class="form-group">
+                                        <label for="{{ form.as_number.id_for_label }}" class="form-label">Local AS Number *</label>
+                                        {{ form.as_number }}
+                                        {% if form.as_number.help_text %}
+                                            <small class="form-text text-muted">{{ form.as_number.help_text }}</small>
+                                        {% endif %}
+                                        {% if form.as_number.errors %}
+                                            <div class="invalid-feedback d-block">
+                                                {{ form.as_number.errors.0 }}
+                                            </div>
+                                        {% endif %}
+                                    </div>
+                                </div>
+                                <div class="col-md-6">
+                                    <div class="form-group">
+                                        <label for="{{ form.vrf_name.id_for_label }}" class="form-label">VRF Name</label>
+                                        {{ form.vrf_name }}
+                                        {% if form.vrf_name.help_text %}
+                                            <small class="form-text text-muted">{{ form.vrf_name.help_text }}</small>
+                                        {% endif %}
+                                        {% if form.vrf_name.errors %}
+                                            <div class="invalid-feedback d-block">
+                                                {{ form.vrf_name.errors.0 }}
+                                            </div>
+                                        {% endif %}
+                                    </div>
+                                </div>
+                            </div>
+
+                            <div class="row">
+                                <div class="col-md-6">
+                                    <div class="form-group">
+                                        <label for="{{ form.network.id_for_label }}" class="form-label">Network Address *</label>
+                                        {{ form.network }}
+                                        {% if form.network.help_text %}
+                                            <small class="form-text text-muted">{{ form.network.help_text }}</small>
+                                        {% endif %}
+                                        {% if form.network.errors %}
+                                            <div class="invalid-feedback d-block">
+                                                {{ form.network.errors.0 }}
+                                            </div>
+                                        {% endif %}
+                                    </div>
+                                </div>
+                                <div class="col-md-6">
+                                    <div class="form-group">
+                                        <label for="{{ form.mask.id_for_label }}" class="form-label">Subnet Mask *</label>
+                                        {{ form.mask }}
+                                        {% if form.mask.help_text %}
+                                            <small class="form-text text-muted">{{ form.mask.help_text }}</small>
+                                        {% endif %}
+                                        {% if form.mask.errors %}
+                                            <div class="invalid-feedback d-block">
+                                                {{ form.mask.errors.0 }}
+                                            </div>
+                                        {% endif %}
+                                    </div>
+                                </div>
+                            </div>
+                        </div>
+
+                        <div class="form-actions">
+                            <button type="submit" class="btn btn-primary">
+                                <i class="fas fa-broadcast-tower"></i> Advertise Network in BGP
+                            </button>
+                            <a href="{% url 'index' %}" class="btn btn-secondary">
+                                <i class="fas fa-times"></i> Cancel
+                            </a>
+                        </div>
+                    </form>
+                </div>
+            </div>
+
+            <!-- Information Card -->
+            <div class="card mt-4">
+                <div class="card-header">
+                    <h6 class="card-title mb-0">
+                        <i class="fas fa-info-circle"></i> BGP Network Advertisement Information
+                    </h6>
+                </div>
+                <div class="card-body">
+                    <div class="row">
+                        <div class="col-md-6">
+                            <h6 class="text-primary">Network Advertisement</h6>
+                            <p class="small text-muted">
+                                BGP network advertisement announces routes to BGP neighbors. Only networks that exist 
+                                in the routing table will be advertised to neighbors.
+                            </p>
+                        </div>
+                        <div class="col-md-6">
+                            <h6 class="text-primary">Network Examples</h6>
+                            <p class="small text-muted">
+                                Common network formats:
+                                <br>• 192.168.1.0 / 255.255.255.0 (Class C)
+                                <br>• 10.0.0.0 / 255.0.0.0 (Class A)
+                                <br>• 172.16.0.0 / 255.240.0.0 (Class B)
+                            </p>
+                        </div>
+                    </div>
+                    <div class="row mt-3">
+                        <div class="col-md-12">
+                            <div class="alert alert-warning">
+                                <i class="fas fa-exclamation-triangle"></i>
+                                <strong>Important:</strong> Ensure the network you're advertising exists in the routing 
+                                table (either as a connected route or static route) before BGP will advertise it.
+                            </div>
+                        </div>
+                    </div>
+                </div>
+            </div>
+        </div>
+    </div>
+</div>
+{% endblock %}

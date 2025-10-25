@@ -1,0 +1,139 @@
+{% extends 'automation/base.html' %}
+{% load static %}
+
+{% block title %}{{ title }} - Network Automation{% endblock %}
+
+{% block content %}
+<div class="container-fluid">
+    <div class="row">
+        <div class="col-md-8 mx-auto">
+            <div class="card">
+                <div class="card-header">
+                    <h4 class="card-title mb-0">
+                        <i class="fas fa-sitemap"></i> {{ title }}
+                    </h4>
+                </div>
+                <div class="card-body">
+                    <form method="post">
+                        {% csrf_token %}
+                        
+                        <!-- Device Selection -->
+                        <div class="mb-4">
+                            <h5 class="text-muted">Device Selection</h5>
+                            <div class="form-group">
+                                <label for="{{ device_form.device.id_for_label }}" class="form-label">Target Device</label>
+                                {{ device_form.device }}
+                                {% if device_form.device.help_text %}
+                                    <small class="form-text text-muted">{{ device_form.device.help_text }}</small>
+                                {% endif %}
+                                {% if device_form.device.errors %}
+                                    <div class="invalid-feedback d-block">
+                                        {{ device_form.device.errors.0 }}
+                                    </div>
+                                {% endif %}
+                            </div>
+                        </div>
+
+                        <hr>
+
+                        <!-- BGP Route Reflector Configuration -->
+                        <div class="mb-4">
+                            <h5 class="text-muted">BGP Route Reflector Configuration</h5>
+                            
+                            <div class="row">
+                                <div class="col-md-6">
+                                    <div class="form-group">
+                                        <label for="{{ form.as_number.id_for_label }}" class="form-label">Local AS Number *</label>
+                                        {{ form.as_number }}
+                                        {% if form.as_number.help_text %}
+                                            <small class="form-text text-muted">{{ form.as_number.help_text }}</small>
+                                        {% endif %}
+                                        {% if form.as_number.errors %}
+                                            <div class="invalid-feedback d-block">
+                                                {{ form.as_number.errors.0 }}
+                                            </div>
+                                        {% endif %}
+                                    </div>
+                                </div>
+                                <div class="col-md-6">
+                                    <div class="form-group">
+                                        <label for="{{ form.router_id.id_for_label }}" class="form-label">BGP Router ID *</label>
+                                        {{ form.router_id }}
+                                        {% if form.router_id.help_text %}
+                                            <small class="form-text text-muted">{{ form.router_id.help_text }}</small>
+                                        {% endif %}
+                                        {% if form.router_id.errors %}
+                                            <div class="invalid-feedback d-block">
+                                                {{ form.router_id.errors.0 }}
+                                            </div>
+                                        {% endif %}
+                                    </div>
+                                </div>
+                            </div>
+
+                            <div class="row">
+                                <div class="col-md-6">
+                                    <div class="form-group">
+                                        <label for="{{ form.cluster_id.id_for_label }}" class="form-label">Cluster ID *</label>
+                                        {{ form.cluster_id }}
+                                        {% if form.cluster_id.help_text %}
+                                            <small class="form-text text-muted">{{ form.cluster_id.help_text }}</small>
+                                        {% endif %}
+                                        {% if form.cluster_id.errors %}
+                                            <div class="invalid-feedback d-block">
+                                                {{ form.cluster_id.errors.0 }}
+                                            </div>
+                                        {% endif %}
+                                    </div>
+                                </div>
+                            </div>
+
+                            <div class="form-group">
+                                <label for="{{ form.clients.id_for_label }}" class="form-label">Route Reflector Clients</label>
+                                {{ form.clients }}
+                                {% if form.clients.help_text %}
+                                    <small class="form-text text-muted">{{ form.clients.help_text }}</small>
+                                {% endif %}
+                                {% if form.clients.errors %}
+                                    <div class="invalid-feedback d-block">
+                                        {{ form.clients.errors.0 }}
+                                    </div>
+                                {% endif %}
+                            </div>
+                        </div>
+
+                        <div class="form-actions">
+                            <button type="submit" class="btn btn-primary">
+                                <i class="fas fa-sitemap"></i> Configure Route Reflector
+                            </button>
+                            <a href="{% url 'index' %}" class="btn btn-secondary">
+                                <i class="fas fa-times"></i> Cancel
+                            </a>
+                        </div>
+                    </form>
+                </div>
+            </div>
+
+            <!-- Information Card -->
+            <div class="card mt-4">
+                <div class="card-header">
+                    <h6 class="card-title mb-0">
+                        <i class="fas fa-info-circle"></i> Route Reflector Information
+                    </h6>
+                </div>
+                <div class="card-body">
+                    <div class="alert alert-info">
+                        <i class="fas fa-lightbulb"></i>
+                        <strong>BGP Route Reflector:</strong> Used to reduce the number of IBGP peering sessions in large networks. 
+                        Route reflectors reflect routes between clients, eliminating the need for full-mesh IBGP.
+                    </div>
+                    <p class="small text-muted">
+                        <strong>Cluster ID:</strong> Identifies the route reflector cluster. Multiple route reflectors in the same cluster should use the same cluster ID.
+                        <br><strong>Clients:</strong> BGP neighbors that will receive reflected routes from this route reflector.
+                    </p>
+                </div>
+            </div>
+        </div>
+    </div>
+</div>
+{% endblock %}
