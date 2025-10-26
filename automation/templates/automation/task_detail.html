@@ -201,6 +201,12 @@ function updateStatusBadge(status) {
                 {% if task.result %}
                 <h6>Command Output:</h6>
                 <div class="output-display">{{ task.result }}</div>
+                {% else %}
+                <div class="alert alert-warning" role="alert">
+                    <i class="bi bi-exclamation-triangle"></i>
+                    <strong>No output received:</strong> The task completed successfully but returned no output. 
+                    This might indicate the device didn't return any data or there was a communication issue.
+                </div>
                 {% endif %}
                 
                 {% if task_result %}

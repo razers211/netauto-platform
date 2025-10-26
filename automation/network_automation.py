@@ -60,12 +60,16 @@ class NetworkDeviceManager:
         if not self.connection:
             raise NetworkAutomationError("Not connected to device")
         
+        logger.info(f"Executing command: {command}")
         try:
             if use_textfsm:
                 output = self.connection.send_command(command, use_textfsm=True)
             else:
                 output = self.connection.send_command(command)
-            return output
+            
+            logger.info(f"Command output length: {len(output) if output else 0} characters")
+            return output if output else "No output received from device"
+            
         except Exception as e:
             logger.error(f"Command execution failed: {e}")
             raise NetworkAutomationError(f"Command failed: {e}")
@@ -75,13 +79,69 @@ class NetworkDeviceManager:
         if not self.connection:
             raise NetworkAutomationError("Not connected to device")
         
+        device_type = self.device_params.get('device_type', '')
+        
         try:
-            output = self.connection.send_config_set(commands)
-            # Save configuration
-            self.connection.save_config()
-            return output
+            # Enter configuration mode based on device type
+            if 'cisco' in device_type:
+                # Cisco devices: enter configure terminal mode
+                self.connection.config_mode()
+                output = self.connection.send_config_set(commands)
+                self.connection.exit_config_mode()
+                # Save configuration
+                save_output = self.connection.save_config()
+                return output + "\n" + save_output
+                
+            elif 'huawei' in device_type:
+                # Huawei devices: enter system-view mode
+                self.connection.send_command("system-view")
+                
+                # Send configuration commands
+                config_output = ""
+                for command in commands:
+                    try:
+                        cmd_output = self.connection.send_command(command)
+                        config_output += f"{command}: {cmd_output}\n"
+                    except Exception as e:
+                        logger.warning(f"Command '{command}' failed: {e}")
+                        config_output += f"{command}: ERROR - {e}\n"
+                
+                # Exit system-view
+                self.connection.send_command("quit")
+                
+                # Commit configuration first (Huawei requirement)
+                try:
+                    commit_output = self.connection.send_command("commit")
+                except Exception as e:
+                    commit_output = f"Commit failed: {e}"
+                
+                # Save configuration
+                try:
+                    save_output = self.connection.send_command("save")
+                    # Handle save confirmation
+                    if "Y/N" in save_output or "y/n" in save_output or "overwrite" in save_output.lower():
+                        save_output += "\n" + self.connection.send_command("y")
+                except Exception as e:
+                    save_output = f"Save failed: {e}"
+                
+                return config_output + f"\n\n--- COMMIT OUTPUT ---\n{commit_output}\n\n--- SAVE OUTPUT ---\n{save_output}"
+                
+            else:
+                # Fallback to netmiko's default behavior
+                output = self.connection.send_config_set(commands)
+                save_output = self.connection.save_config()
+                return output + "\n" + save_output
+                
         except Exception as e:
             logger.error(f"Configuration failed: {e}")
+            # Try to exit config mode if we're stuck
+            try:
+                if 'cisco' in device_type:
+                    self.connection.exit_config_mode()
+                elif 'huawei' in device_type:
+                    self.connection.send_command("quit")
+            except:
+                pass
             raise NetworkAutomationError(f"Configuration failed: {e}")
 
 
