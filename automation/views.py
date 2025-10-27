@@ -1695,7 +1695,20 @@ def api_device_vrfs(request, device_id):
         if success:
             # Parse VRFs from the result
             vrfs = parse_vrfs_from_output(result, device.device_type)
-            return JsonResponse({'vrfs': vrfs})
+            
+            # Include raw output in debug mode for troubleshooting
+            response_data = {'vrfs': vrfs}
+            
+            # Add debug info if requested
+            if request.GET.get('debug') == '1':
+                response_data['debug'] = {
+                    'raw_output': result,
+                    'device_type': device.device_type,
+                    'output_length': len(result) if result else 0,
+                    'parsed_vrfs_count': len(vrfs)
+                }
+            
+            return JsonResponse(response_data)
         else:
             return JsonResponse({'error': f'Failed to retrieve VRFs: {error}'}, status=500)
             
@@ -1759,59 +1772,196 @@ def parse_interfaces_from_output(output, device_type):
 
 
 def parse_vrfs_from_output(output, device_type):
-    """Parse VRF names from show VRF output"""
+    """Parse VRF names from show VRF output with improved logic and debugging"""
     vrfs = []
     
     if not output:
         return vrfs
     
+    # Log the raw output for debugging
+    import logging
+    logger = logging.getLogger(__name__)
+    logger.info(f"Parsing VRFs from {device_type} output (length: {len(output)})")
+    logger.debug(f"Raw VRF output: {repr(output[:500])}...")  # First 500 chars for debugging
+    
     lines = output.split('\n')
+    logger.info(f"Processing {len(lines)} lines for VRF parsing")
     
     try:
         if device_type in ['huawei', 'huawei_vrpv8']:
-            # Huawei VRF parsing
-            for line in lines:
-                line = line.strip()
-                # Skip headers and empty lines
-                if not line or 'VPN-Instance' in line or 'Name' in line or '----' in line:
-                    continue
-                # Extract VRF name (first column)
-                parts = line.split()
-                if parts and not parts[0].isdigit():
-                    vrf_name = parts[0]
-                    if vrf_name not in vrfs and vrf_name != 'Total':
-                        vrfs.append(vrf_name)
-        
+            vrfs = parse_huawei_vrfs(lines, logger)
         elif device_type in ['cisco_ios', 'cisco_xe']:
-            # Cisco VRF parsing
-            for line in lines:
-                line = line.strip()
-                # Skip headers and empty lines
-                if not line or 'Name' in line or '----' in line:
-                    continue
-                # Extract VRF name (first column)
-                parts = line.split()
-                if parts:
-                    vrf_name = parts[0]
-                    if vrf_name not in vrfs:
-                        vrfs.append(vrf_name)
-        
+            vrfs = parse_cisco_vrfs(lines, logger)
         elif device_type == 'juniper':
-            # Juniper VRF parsing
-            for line in lines:
-                line = line.strip()
-                if 'instance-type vrf' in line:
-                    # Extract VRF name from before "instance-type"
-                    parts = line.split()
-                    for i, part in enumerate(parts):
-                        if part == 'instance-type' and i > 0:
-                            vrf_name = parts[i-1]
-                            if vrf_name not in vrfs:
-                                vrfs.append(vrf_name)
-                            break
-    
-    except Exception:
-        # Fallback: return empty list if parsing fails
+            vrfs = parse_juniper_vrfs(lines, logger)
+        else:
+            logger.warning(f"Unsupported device type for VRF parsing: {device_type}")
+            
+    except Exception as e:
+        logger.error(f"VRF parsing failed for {device_type}: {e}")
+        # Return empty list on parsing failure
         pass
     
+    logger.info(f"Parsed {len(vrfs)} VRFs: {vrfs}")
     return sorted(vrfs)
+
+
+def parse_huawei_vrfs(lines, logger):
+    """Parse Huawei VRF output with enhanced logic for Huawei devices"""
+    vrfs = []
+    
+    # Words that indicate this is a header or non-VRF line
+    skip_words = {
+        'vpn-instance', 'instance', 'name', 'rd', 'description', 'desc',
+        'total', 'count', '----', '====', '*', 'statistics', 'summary',
+        'vpn', 'route', 'distinguisher', 'import', 'export', 'target',
+        'interface', 'interfaces', 'protocol', 'protocols', 'status'
+    }
+    
+    # Process each line
+    for i, line in enumerate(lines):
+        original_line = line
+        line = line.strip()
+        
+        # Skip empty lines
+        if not line:
+            continue
+        
+        # Skip lines that are clearly headers (contain multiple header keywords)
+        line_lower = line.lower()
+        header_word_count = sum(1 for word in skip_words if word in line_lower)
+        if header_word_count >= 2:  # If line contains 2+ header keywords, it's probably a header
+            logger.debug(f"Skipping header line {i} (contains {header_word_count} header words): {line}")
+            continue
+            
+        # Skip separator lines (lines with mostly special characters)
+        if len([c for c in line if c in '-=*+|']) > len(line) * 0.5:
+            logger.debug(f"Skipping separator line {i}: {line}")
+            continue
+            
+        # Split line into parts
+        parts = line.split()
+        if not parts:
+            continue
+            
+        # Get the potential VRF name (first word)
+        potential_vrf = parts[0]
+        
+        # Validate the potential VRF name
+        if is_valid_vrf_name(potential_vrf, skip_words, logger):
+            if potential_vrf not in vrfs:
+                logger.info(f"Found Huawei VRF: '{potential_vrf}' from line {i}: {original_line}")
+                vrfs.append(potential_vrf)
+        else:
+            logger.debug(f"Rejected VRF candidate '{potential_vrf}' from line {i}: {line}")
+            
+    return vrfs
+
+
+def is_valid_vrf_name(name, skip_words, logger):
+    """Validate if a string looks like a valid VRF name"""
+    if not name or len(name) == 0:
+        return False
+        
+    name_lower = name.lower()
+    
+    # Check if it's in our skip words list
+    if name_lower in skip_words:
+        logger.debug(f"'{name}' is in skip_words list")
+        return False
+        
+    # Don't accept single characters (likely column separators)
+    if len(name) <= 1:
+        logger.debug(f"'{name}' is too short")
+        return False
+        
+    # Don't accept if it's just numbers
+    if name.isdigit():
+        logger.debug(f"'{name}' is just digits")
+        return False
+        
+    # Don't accept if it starts with special characters that indicate formatting
+    if name.startswith(('-', '=', '*', '+', '|', '[', '(')):
+        logger.debug(f"'{name}' starts with special character")
+        return False
+        
+    # VRF names typically contain alphanumeric characters, underscores, hyphens
+    import re
+    if not re.match(r'^[a-zA-Z0-9_-]+$', name):
+        logger.debug(f"'{name}' contains invalid characters for VRF name")
+        return False
+        
+    return True
+
+
+def parse_cisco_vrfs(lines, logger):
+    """Parse Cisco VRF output with enhanced logic"""
+    vrfs = []
+    
+    # Words that indicate this is a header or non-VRF line for Cisco
+    skip_words = {
+        'name', 'default', 'rd', 'protocols', 'interfaces', 'vrf',
+        'total', 'count', '----', '====', '*', 'statistics', 'summary',
+        'route', 'distinguisher', 'import', 'export', 'target',
+        'protocol', 'interface', 'status', 'state'
+    }
+    
+    # Process each line
+    for i, line in enumerate(lines):
+        original_line = line
+        line = line.strip()
+        
+        # Skip empty lines
+        if not line:
+            continue
+        
+        # Skip lines that are clearly headers (contain multiple header keywords)
+        line_lower = line.lower()
+        header_word_count = sum(1 for word in skip_words if word in line_lower)
+        if header_word_count >= 2:  # If line contains 2+ header keywords, it's probably a header
+            logger.debug(f"Skipping Cisco header line {i} (contains {header_word_count} header words): {line}")
+            continue
+            
+        # Skip separator lines (lines with mostly special characters)
+        if len([c for c in line if c in '-=*+|']) > len(line) * 0.5:
+            logger.debug(f"Skipping Cisco separator line {i}: {line}")
+            continue
+            
+        # Split line into parts
+        parts = line.split()
+        if not parts:
+            continue
+            
+        # Get the potential VRF name (first word)
+        potential_vrf = parts[0]
+        
+        # Validate the potential VRF name
+        if is_valid_vrf_name(potential_vrf, skip_words, logger):
+            if potential_vrf not in vrfs:
+                logger.info(f"Found Cisco VRF: '{potential_vrf}' from line {i}: {original_line}")
+                vrfs.append(potential_vrf)
+        else:
+            logger.debug(f"Rejected Cisco VRF candidate '{potential_vrf}' from line {i}: {line}")
+            
+    return vrfs
+
+
+def parse_juniper_vrfs(lines, logger):
+    """Parse Juniper VRF output with enhanced logic"""
+    vrfs = []
+    
+    for i, line in enumerate(lines):
+        line = line.strip()
+        
+        if 'instance-type vrf' in line:
+            # Extract VRF name from before "instance-type"
+            parts = line.split()
+            for j, part in enumerate(parts):
+                if part == 'instance-type' and j > 0:
+                    potential_vrf = parts[j-1]
+                    if potential_vrf not in vrfs:
+                        logger.debug(f"Found Juniper VRF: '{potential_vrf}' from line {i}: {line}")
+                        vrfs.append(potential_vrf)
+                    break
+                    
+    return vrfs
