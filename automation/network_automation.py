@@ -64,10 +64,10 @@ class NetworkDeviceManager:
         if not self.device_params.get('debug_mode', False):
             self.device_params.pop('session_log', None)
         
-        # Device-specific performance optimizations
+        # Device-specific performance optimizations (balanced for reliability)
         if 'huawei' in self.device_type:
-            # Huawei optimizations
-            self.device_params.setdefault('global_delay_factor', 0.3)  # Very fast for Huawei
+            # Huawei optimizations - balanced speed and reliability
+            self.device_params.setdefault('global_delay_factor', 0.8)  # More conservative for Huawei
             self.device_params.setdefault('fast_cli', True)
             
             # Configure enable mode credentials
@@ -76,8 +76,8 @@ class NetworkDeviceManager:
                     self.device_params['secret'] = self.device_params['password']
         
         elif 'cisco' in self.device_type:
-            # Cisco optimizations  
-            self.device_params.setdefault('global_delay_factor', 0.2)  # Very fast for Cisco
+            # Cisco optimizations - balanced speed and reliability
+            self.device_params.setdefault('global_delay_factor', 0.5)  # More conservative for Cisco
             self.device_params.setdefault('fast_cli', True)
     
     # Removed slow testing methods - replaced with fast session setup
@@ -149,8 +149,8 @@ class NetworkDeviceManager:
                 output = self.connection.send_command(
                     command, 
                     use_textfsm=use_textfsm,
-                    delay_factor=0.3,  # Much faster
-                    max_loops=50,  # Reduced from 100
+                    delay_factor=0.8,  # Increased for better prompt detection
+                    max_loops=100,  # Increased for reliability
                     strip_prompt=True,
                     strip_command=True
                 )
@@ -158,17 +158,18 @@ class NetworkDeviceManager:
                 output = self.connection.send_command(
                     command,
                     use_textfsm=use_textfsm,
-                    delay_factor=0.2,  # Much faster 
-                    max_loops=30,  # Reduced from 200
+                    delay_factor=0.5,  # Increased for better prompt detection
+                    max_loops=80,   # Increased for reliability
                     strip_prompt=True,
                     strip_command=True
                 )
             else:
-                # Default fast settings
+                # Default balanced settings
                 output = self.connection.send_command(
                     command,
                     use_textfsm=use_textfsm,
-                    delay_factor=0.5,
+                    delay_factor=1.0,  # Conservative for unknown devices
+                    max_loops=100,
                     strip_prompt=True,
                     strip_command=True
                 )
@@ -305,7 +306,7 @@ class NetworkDeviceManager:
             logger.debug("Executing Cisco configuration commands")
             config_output = self.connection.send_config_set(
                 commands, 
-                delay_factor=0.2,  # Much faster
+                delay_factor=0.5,  # Increased from 0.2 for better prompt detection
                 cmd_verify=False,   # Skip verification for speed
                 enter_config_mode=True,   # Let Netmiko handle config mode
                 exit_config_mode=True     # Let Netmiko handle exit
@@ -338,7 +339,7 @@ class NetworkDeviceManager:
                 logger.debug(f"Sending {len(commands)} commands with manual mode handling")
                 config_output = self.connection.send_config_set(
                     commands, 
-                    delay_factor=0.3,
+                    delay_factor=0.8,  # Increased from 0.3 for better prompt detection
                     cmd_verify=False,
                     enter_config_mode=False,  # We handle manually
                     exit_config_mode=False    # We handle manually
@@ -395,19 +396,24 @@ class NetworkDeviceManager:
             
             # Enter system-view mode
             logger.debug("Entering Huawei system-view...")
-            result = self.connection.send_command("system-view", delay_factor=0.3)
+            result = self.connection.send_command(
+                "system-view", 
+                delay_factor=1.0,  # Increased from 0.3 for reliability
+                max_loops=150       # Give more time for prompt detection
+            )
             
             # Verify entry was successful
             new_prompt = self.connection.find_prompt()
             logger.debug(f"After system-view prompt: '{new_prompt}'")
             
-            # Check for errors
-            if "Error" in result or "Unrecognized" in result:
-                raise NetworkAutomationError(f"System-view failed: {result}")
+            # Check for errors in command output
+            if "Error" in result or "Unrecognized" in result or "Invalid" in result:
+                raise NetworkAutomationError(f"System-view command failed: {result[:100]}")
                 
-            # Verify we're in config mode (prompt should end with ])
+            # Verify we're in config mode (prompt should end with ] for Huawei)
             if not new_prompt.strip().endswith(']'):
-                logger.warning(f"System-view may not have worked. Prompt: '{new_prompt}'")
+                logger.warning(f"System-view verification failed. Expected ']' prompt, got: '{new_prompt}'")
+                # Still continue - some Huawei devices may have different prompt patterns
                 
         except Exception as e:
             logger.error(f"Cannot enter Huawei system-view: {e}")
@@ -427,7 +433,11 @@ class NetworkDeviceManager:
             
             # Exit system-view with quit command
             logger.debug("Exiting Huawei system-view...")
-            result = self.connection.send_command("quit", delay_factor=0.2)
+            result = self.connection.send_command(
+                "quit", 
+                delay_factor=1.0,  # Increased from 0.2 for reliability
+                max_loops=100       # Give more time for prompt detection
+            )
             
             # Verify exit
             new_prompt = self.connection.find_prompt()
@@ -471,6 +481,44 @@ class NetworkDeviceManager:
             results.append(f"--- SAVE FAILED ---\n{e}")
         
         return "\n\n".join(results)
+    
+    def debug_connection_state(self) -> dict:
+        """Debug method to check connection and prompt state"""
+        debug_info = {}
+        
+        try:
+            # Basic connection info
+            debug_info['connected'] = bool(self.connection and self.connection.remote_conn)
+            debug_info['device_type'] = self.device_type
+            debug_info['host'] = self.device_params.get('host', 'unknown')
+            
+            if self.connection:
+                # Get current prompt with generous timing
+                try:
+                    current_prompt = self.connection.find_prompt(delay_factor=2.0)
+                    debug_info['current_prompt'] = current_prompt
+                    debug_info['prompt_length'] = len(current_prompt)
+                    debug_info['prompt_ends_with'] = current_prompt[-5:] if len(current_prompt) >= 5 else current_prompt
+                except Exception as prompt_error:
+                    debug_info['prompt_error'] = str(prompt_error)
+                
+                # Test simple command
+                try:
+                    test_cmd = "display clock" if 'huawei' in self.device_type else "show clock"
+                    test_output = self.connection.send_command(test_cmd, delay_factor=2.0, max_loops=200)
+                    debug_info['test_command'] = test_cmd
+                    debug_info['test_output_length'] = len(test_output) if test_output else 0
+                    debug_info['test_success'] = len(test_output) > 10 if test_output else False
+                except Exception as test_error:
+                    debug_info['test_error'] = str(test_error)
+                    
+            else:
+                debug_info['connection_object'] = 'None'
+                
+        except Exception as e:
+            debug_info['debug_error'] = str(e)
+        
+        return debug_info
     
     def _enter_huawei_config_mode(self) -> bool:
         """Enter Huawei configuration mode using best available method"""

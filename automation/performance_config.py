@@ -30,20 +30,20 @@ FAST_LOGGING_CONFIG = {
     },
 }
 
-# Ultra-fast device connection parameters
+# Balanced performance and reliability parameters
 SPEED_OPTIMIZED_PARAMS = {
-    # Connection timeouts (reduced for speed)
-    'timeout': 15,           # Reduced from 60s
-    'conn_timeout': 8,       # Reduced from 20s  
-    'auth_timeout': 10,      # Fast authentication
-    'banner_timeout': 8,     # Fast banner detection
+    # Connection timeouts (balanced)
+    'timeout': 20,           # Balanced from 60s -> 20s
+    'conn_timeout': 12,      # Balanced from 20s -> 12s  
+    'auth_timeout': 15,      # Balanced authentication
+    'banner_timeout': 12,    # Balanced banner detection
     
     # Performance settings
     'fast_cli': True,        # Enable fast CLI mode
-    'global_delay_factor': 0.2,  # Very aggressive timing
+    'global_delay_factor': 0.8,  # Balanced timing for reliability
     'keepalive': 0,          # Disable keepalive for speed
     
-    # Disable features that slow down execution
+    # Optimized features
     'auto_connect': True,    # Skip manual connection steps
     'session_timeout': 300,  # Shorter session timeout
 }
@@ -51,24 +51,24 @@ SPEED_OPTIMIZED_PARAMS = {
 # Device-specific speed optimizations
 DEVICE_SPEED_CONFIGS = {
     'cisco_ios': {
-        'global_delay_factor': 0.1,  # Cisco is usually very fast
+        'global_delay_factor': 0.5,  # Balanced for reliable prompt detection
         'fast_cli': True,
-        'timeout': 10,
+        'timeout': 15,
     },
     'cisco_xe': {
-        'global_delay_factor': 0.1,
+        'global_delay_factor': 0.5,
         'fast_cli': True,
-        'timeout': 10,
+        'timeout': 15,
     },
     'huawei': {
-        'global_delay_factor': 0.2,  # Huawei needs slightly more time
+        'global_delay_factor': 0.8,  # More conservative for Huawei
         'fast_cli': True,
-        'timeout': 12,
+        'timeout': 18,
     },
     'huawei_vrpv8': {
-        'global_delay_factor': 0.2,
+        'global_delay_factor': 0.8,
         'fast_cli': True,
-        'timeout': 12,
+        'timeout': 18,
     },
 }
 
