@@ -294,17 +294,21 @@ class NetworkDeviceManager:
         logger.info(f"Configuring Cisco device with {len(commands)} commands")
         
         try:
-            # Fast enable mode entry (no prompt checking unless needed)
+            # Ensure we're in enable mode first
             if not self.connection.check_enable_mode():
+                logger.debug("Entering Cisco enable mode")
                 self.connection.enable()
+                enable_prompt = self.connection.find_prompt()
+                logger.debug(f"Enable mode prompt: '{enable_prompt}'")
             
-            # High-speed configuration execution
+            # High-speed configuration execution with proper mode handling
+            logger.debug("Executing Cisco configuration commands")
             config_output = self.connection.send_config_set(
                 commands, 
                 delay_factor=0.2,  # Much faster
                 cmd_verify=False,   # Skip verification for speed
-                enter_config_mode=True,
-                exit_config_mode=True
+                enter_config_mode=True,   # Let Netmiko handle config mode
+                exit_config_mode=True     # Let Netmiko handle exit
             )
             
             # Fast save (optional - can be disabled for even more speed)
@@ -326,20 +330,36 @@ class NetworkDeviceManager:
         logger.info(f"Configuring Huawei device with {len(commands)} commands")
         
         try:
-            # Fast configuration mode entry
-            self._fast_enter_huawei_config()
+            # Try fast manual config mode first
+            try:
+                self._fast_enter_huawei_config()
+                
+                # Execute with manual mode handling
+                logger.debug(f"Sending {len(commands)} commands with manual mode handling")
+                config_output = self.connection.send_config_set(
+                    commands, 
+                    delay_factor=0.3,
+                    cmd_verify=False,
+                    enter_config_mode=False,  # We handle manually
+                    exit_config_mode=False    # We handle manually
+                )
+                
+                self._fast_exit_huawei_config()
+                
+            except Exception as manual_error:
+                logger.warning(f"Manual config mode failed: {manual_error}")
+                logger.info("Falling back to Netmiko automatic mode handling")
+                
+                # Fallback to Netmiko's built-in mode handling
+                config_output = self.connection.send_config_set(
+                    commands,
+                    delay_factor=0.5,  # Slightly slower but more reliable
+                    cmd_verify=False,
+                    enter_config_mode=True,   # Let Netmiko handle it
+                    exit_config_mode=True     # Let Netmiko handle it
+                )
             
-            # High-speed configuration execution
-            config_output = self.connection.send_config_set(
-                commands, 
-                delay_factor=0.3,  # Much faster than 3
-                cmd_verify=False,   # Skip verification for speed
-                enter_config_mode=False,  # We handle this manually for speed
-                exit_config_mode=False    # We handle this manually for speed
-            )
-            
-            # Fast exit from config mode
-            self._fast_exit_huawei_config()
+            logger.debug(f"Configuration output length: {len(config_output)}")
             
             # Fast commit and save (simplified)
             if self.device_params.get('auto_commit', True):
@@ -362,33 +382,65 @@ class NetworkDeviceManager:
             raise NetworkAutomationError(f"Huawei configuration failed: {e}")
     
     def _fast_enter_huawei_config(self):
-        """Fast entry to Huawei configuration mode"""
+        """Fast entry to Huawei system-view configuration mode"""
         try:
-            # Try enable mode first (fastest)
-            if hasattr(self.connection, 'enable') and hasattr(self.connection, 'check_enable_mode'):
-                if not self.connection.check_enable_mode():
-                    self.connection.enable()
+            # Check current prompt to see if already in system-view
+            current_prompt = self.connection.find_prompt()
+            logger.debug(f"Current Huawei prompt: '{current_prompt}'")
+            
+            # If already in system-view (prompt ends with ]), skip entry
+            if current_prompt.strip().endswith(']'):
+                logger.debug("Already in Huawei system-view")
                 return
-        except:
-            pass
-        
-        # Fallback to system-view (still fast)
-        try:
-            self.connection.send_command("system-view", delay_factor=0.1)
+            
+            # Enter system-view mode
+            logger.debug("Entering Huawei system-view...")
+            result = self.connection.send_command("system-view", delay_factor=0.3)
+            
+            # Verify entry was successful
+            new_prompt = self.connection.find_prompt()
+            logger.debug(f"After system-view prompt: '{new_prompt}'")
+            
+            # Check for errors
+            if "Error" in result or "Unrecognized" in result:
+                raise NetworkAutomationError(f"System-view failed: {result}")
+                
+            # Verify we're in config mode (prompt should end with ])
+            if not new_prompt.strip().endswith(']'):
+                logger.warning(f"System-view may not have worked. Prompt: '{new_prompt}'")
+                
         except Exception as e:
+            logger.error(f"Cannot enter Huawei system-view: {e}")
             raise NetworkAutomationError(f"Cannot enter Huawei config mode: {e}")
     
     def _fast_exit_huawei_config(self):
-        """Fast exit from Huawei configuration mode"""
+        """Fast exit from Huawei system-view configuration mode"""
         try:
-            # Try Netmiko's method first
-            if hasattr(self.connection, 'exit_config_mode'):
-                self.connection.exit_config_mode()
+            # Check current prompt
+            current_prompt = self.connection.find_prompt()
+            logger.debug(f"Before exit prompt: '{current_prompt}'")
+            
+            # If not in system-view (doesn't end with ]), already out
+            if not current_prompt.strip().endswith(']'):
+                logger.debug("Not in Huawei system-view, no need to exit")
+                return
+            
+            # Exit system-view with quit command
+            logger.debug("Exiting Huawei system-view...")
+            result = self.connection.send_command("quit", delay_factor=0.2)
+            
+            # Verify exit
+            new_prompt = self.connection.find_prompt()
+            logger.debug(f"After quit prompt: '{new_prompt}'")
+            
+            # Should now be back to user view (prompt ends with >)
+            if new_prompt.strip().endswith('>'):
+                logger.debug("Successfully exited to user view")
             else:
-                # Fallback to manual quit
-                self.connection.send_command("quit", delay_factor=0.1)
+                logger.warning(f"Exit may not have worked. Prompt: '{new_prompt}'")
+                
         except Exception as e:
-            logger.debug(f"Fast exit from config mode failed: {e}")
+            logger.warning(f"Exit from Huawei system-view failed: {e}")
     
     def _fast_huawei_commit_save(self) -> str:
         """Fast commit and save for Huawei devices"""
@@ -475,19 +527,31 @@ class NetworkDeviceManager:
         except Exception as e:
             logger.warning(f"Could not exit config mode cleanly: {e}")
     
+    @performance_monitor("Generic Configuration")
     def _execute_generic_config(self, commands: List[str]) -> str:
         """Execute configuration for generic/other device types"""
+        logger.info(f"Configuring generic device with {len(commands)} commands")
+        
         try:
-            logger.info(f"Executing {len(commands)} generic configuration commands")
-            output = self.connection.send_config_set(commands)
+            # Use Netmiko's built-in config mode handling for reliability
+            config_output = self.connection.send_config_set(
+                commands,
+                delay_factor=0.3,
+                cmd_verify=False,
+                enter_config_mode=True,  # Let Netmiko handle mode entry
+                exit_config_mode=True    # Let Netmiko handle mode exit
+            )
             
-            # Try to save if the method exists
-            try:
-                save_output = self.connection.save_config()
-                return output + "\n\n--- SAVE OUTPUT ---\n" + save_output
-            except Exception:
-                logger.info("save_config() not available for this device type")
-                return output
+            # Try to save if available
+            if self.device_params.get('auto_save', True):
+                try:
+                    save_output = self.connection.save_config()
+                    return config_output + "\n\n--- SAVE OUTPUT ---\n" + save_output
+                except Exception:
+                    logger.info("save_config() not available for this device type")
+                    return config_output + "\n\n--- SAVE NOT AVAILABLE ---"
+            else:
+                return config_output + "\n\n--- SAVE SKIPPED FOR SPEED ---"
                 
         except Exception as e:
             logger.error(f"Generic configuration failed: {e}")
