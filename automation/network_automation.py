@@ -53,80 +53,115 @@ class NetworkDeviceManager:
                     self.device_params['secret'] = self.device_params['password']
     
     def test_device_prompt(self) -> bool:
-        """Test device prompt detection and configure session settings"""
+        """Test device prompt detection and configure session settings using Netmiko built-ins"""
         if not self.connection:
             return False
             
         try:
-            # Try to get current prompt
-            prompt = self.connection.find_prompt()
-            logger.info(f"Device prompt detected: '{prompt}'")
+            # Use Netmiko's find_prompt() method consistently
+            initial_prompt = self.connection.find_prompt()
+            logger.info(f"Initial device prompt detected: '{initial_prompt}'")
             
-            # For Huawei devices, test configuration access and configure session
-            if 'huawei' in self.device_type:
-                try:
-                    # Test configuration mode access
-                    logger.info("Testing Huawei configuration access...")
-                    
-                    # Try enable mode first, then manual system-view
-                    config_access_ok = False
-                    
-                    try:
-                        # Test enable mode if available
-                        if hasattr(self.connection, 'check_enable_mode'):
-                            if self.connection.check_enable_mode():
-                                logger.info("Already in enable mode")
-                                config_access_ok = True
-                            else:
-                                logger.info("Testing enable mode entry")
-                                self.connection.enable()
-                                config_access_ok = True
-                                logger.info("Enable mode works")
-                                # Exit back to user mode
-                                self.connection.exit_enable_mode()
-                        else:
-                            logger.info("Enable mode methods not available, testing system-view")
-                    except Exception as enable_error:
-                        logger.info(f"Enable mode not available: {enable_error}")
-                    
-                    # Test manual system-view if enable mode didn't work
-                    if not config_access_ok:
-                        try:
-                            result = self.connection.send_command("system-view")
-                            if "Error" not in result and "Unrecognized" not in result:
-                                config_access_ok = True
-                                logger.info("System-view access works")
-                                # Exit system-view
-                                self.connection.send_command("quit")
-                            else:
-                                logger.warning(f"System-view returned error: {result}")
-                        except Exception as sv_error:
-                            logger.warning(f"System-view test failed: {sv_error}")
-                    
-                    # Configure session settings for better reliability (in user mode)
-                    session_commands = [
-                        "screen-length 0 temporary",
-                        "undo terminal monitor"
-                    ]
-                    
-                    for cmd in session_commands:
-                        try:
-                            self.connection.send_command(cmd, delay_factor=1)
-                            logger.debug(f"Session command '{cmd}' executed")
-                        except Exception as cmd_error:
-                            logger.debug(f"Session command '{cmd}' failed (expected): {cmd_error}")
-                    
-                    if config_access_ok:
-                        logger.info("Huawei configuration access verified")
-                    else:
-                        logger.warning("Could not verify configuration access, but connection is working")
-                        
-                except Exception as e:
-                    logger.warning(f"Huawei configuration test failed, but connection seems OK: {e}")
+            # Configure optimal session settings based on device type
+            self._configure_session_settings()
+            
+            # Test enable mode access for both Cisco and Huawei
+            if 'cisco' in self.device_type or 'huawei' in self.device_type:
+                self._test_enable_mode_access()
+            
+            # Verify final prompt after configuration
+            final_prompt = self.connection.find_prompt()
+            logger.info(f"Final device prompt: '{final_prompt}'")
             
             return True
         except Exception as e:
-            logger.error(f"Prompt detection test failed: {e}")
+            logger.error(f"Device prompt and session setup failed: {e}")
+            return False
+    
+    def _configure_session_settings(self):
+        """Configure session settings for optimal operation"""
+        session_commands = []
+        
+        if 'cisco' in self.device_type:
+            session_commands = [
+                "terminal length 0",
+                "terminal width 0"
+            ]
+        elif 'huawei' in self.device_type:
+            session_commands = [
+                "screen-length 0 temporary",
+                "undo terminal monitor"
+            ]
+        
+        for cmd in session_commands:
+            try:
+                self.connection.send_command(cmd, delay_factor=1)
+                logger.debug(f"Session command '{cmd}' executed successfully")
+            except Exception as cmd_error:
+                logger.debug(f"Session command '{cmd}' failed (may be expected): {cmd_error}")
+    
+    def _test_enable_mode_access(self):
+        """Test enable mode access using Netmiko's built-in methods"""
+        try:
+            logger.info(f"Testing enable mode access for {self.device_type}...")
+            
+            # Check if already in enable mode
+            if self.connection.check_enable_mode():
+                logger.info("Already in enable/privileged mode")
+                return True
+            
+            # Try to enter enable mode
+            logger.info("Attempting to enter enable mode...")
+            self.connection.enable()
+            
+            # Verify enable mode entry
+            if self.connection.check_enable_mode():
+                enable_prompt = self.connection.find_prompt()
+                logger.info(f"Successfully entered enable mode. Prompt: '{enable_prompt}'")
+                
+                # For testing, exit back to user mode
+                try:
+                    self.connection.exit_enable_mode()
+                    user_prompt = self.connection.find_prompt()
+                    logger.info(f"Successfully returned to user mode. Prompt: '{user_prompt}'")
+                except Exception as exit_error:
+                    logger.warning(f"Could not exit enable mode cleanly: {exit_error}")
+                
+                return True
+            else:
+                logger.warning("Enable mode entry appeared to succeed but check_enable_mode() returned False")
+                return False
+                
+        except Exception as e:
+            logger.info(f"Enable mode test failed (may be normal for some devices): {e}")
+            
+            # For Huawei, try system-view as fallback
+            if 'huawei' in self.device_type:
+                return self._test_huawei_system_view()
+            
+            return False
+    
+    def _test_huawei_system_view(self):
+        """Test Huawei system-view access as fallback to enable mode"""
+        try:
+            logger.info("Testing Huawei system-view access...")
+            
+            result = self.connection.send_command("system-view")
+            if "Error" not in result and "Unrecognized" not in result:
+                system_prompt = self.connection.find_prompt()
+                logger.info(f"Successfully entered system-view. Prompt: '{system_prompt}'")
+                
+                # Exit system-view
+                self.connection.send_command("quit")
+                user_prompt = self.connection.find_prompt()
+                logger.info(f"Exited system-view. Prompt: '{user_prompt}'")
+                return True
+            else:
+                logger.warning(f"System-view returned error: {result[:100]}")
+                return False
+                
+        except Exception as e:
+            logger.warning(f"System-view test failed: {e}")
             return False
         
     def __enter__(self):
@@ -166,7 +201,7 @@ class NetworkDeviceManager:
             logger.info(f"Disconnected from {self.device_params['host']}")
     
     def execute_command(self, command: str, use_textfsm: bool = False) -> str:
-        """Execute a single command on the device with connection recovery."""
+        """Execute a single command with enhanced connection state tracking using find_prompt()"""
         if not self.connection:
             raise NetworkAutomationError("Not connected to device")
         
@@ -175,26 +210,65 @@ class NetworkDeviceManager:
         
         for attempt in range(max_retries + 1):
             try:
-                # Check and restore connection if needed on retries
+                # Check connection state and restore if needed on retries
                 if attempt > 0:
                     logger.info(f"Retry attempt {attempt} for command: {command}")
                     self._reconnect_if_needed()
                 
-                # Try command execution with longer delay for Huawei devices
-                if 'huawei' in self.device_type:
-                    # Use longer delay for Huawei devices
-                    if use_textfsm:
-                        output = self.connection.send_command(command, use_textfsm=True, delay_factor=2)
-                    else:
-                        output = self.connection.send_command(command, delay_factor=2)
-                else:
-                    # Standard execution for other devices
-                    if use_textfsm:
-                        output = self.connection.send_command(command, use_textfsm=True)
-                    else:
-                        output = self.connection.send_command(command)
+                # Get prompt before command execution for state awareness
+                try:
+                    pre_command_prompt = self.connection.find_prompt()
+                    logger.debug(f"Pre-command prompt: '{pre_command_prompt.strip()}'")
+                except Exception as prompt_error:
+                    logger.warning(f"Could not get pre-command prompt: {prompt_error}")
+                    # Continue anyway, but this might indicate connection issues
                 
-                logger.info(f"Command output length: {len(output) if output else 0} characters")
+                # Execute command with appropriate settings based on device type
+                if 'huawei' in self.device_type:
+                    # Enhanced settings for Huawei devices
+                    output = self.connection.send_command(
+                        command, 
+                        use_textfsm=use_textfsm,
+                        delay_factor=2,
+                        max_loops=100,  # Allow more time for complex commands
+                        strip_prompt=True,
+                        strip_command=True
+                    )
+                elif 'cisco' in self.device_type:
+                    # Optimized settings for Cisco devices
+                    output = self.connection.send_command(
+                        command,
+                        use_textfsm=use_textfsm,
+                        delay_factor=1,
+                        max_loops=200,
+                        strip_prompt=True,
+                        strip_command=True
+                    )
+                else:
+                    # Default settings for other device types
+                    output = self.connection.send_command(
+                        command,
+                        use_textfsm=use_textfsm,
+                        strip_prompt=True,
+                        strip_command=True
+                    )
+                
+                # Verify prompt state after command execution
+                try:
+                    post_command_prompt = self.connection.find_prompt()
+                    logger.debug(f"Post-command prompt: '{post_command_prompt.strip()}'")
+                    
+                    # Basic sanity check - prompt should still be valid
+                    if not post_command_prompt or len(post_command_prompt.strip()) == 0:
+                        logger.warning("Empty prompt detected after command execution - possible connection issue")
+                        
+                except Exception as post_prompt_error:
+                    logger.warning(f"Could not get post-command prompt: {post_prompt_error}")
+                
+                # Log command success and return output
+                output_length = len(output) if output else 0
+                logger.info(f"Command '{command}' executed successfully - output: {output_length} characters")
+                
                 return output if output else "No output received from device"
                 
             except Exception as e:
@@ -206,35 +280,51 @@ class NetworkDeviceManager:
                     continue
                 else:
                     # Final attempt failed or non-connection error
-                    logger.error(f"Command failed after {attempt + 1} attempts: {e}")
+                    logger.error(f"Command '{command}' failed after {attempt + 1} attempts: {e}")
                     raise NetworkAutomationError(f"Command failed: {e}")
     
     def _check_connection_health(self) -> bool:
-        """Check if connection is healthy with multiple tests."""
+        """Check if connection is healthy using Netmiko's built-in methods"""
         if not self.connection:
             return False
             
         try:
             # Test 1: Check if connection object exists and is connected
             if not hasattr(self.connection, 'remote_conn') or not self.connection.remote_conn:
-                logger.warning("Connection object is not properly connected")
+                logger.debug("Connection object is not properly connected")
                 return False
             
-            # Test 2: Try to find prompt
+            # Test 2: Use Netmiko's find_prompt() as primary health check
+            # This is reliable and efficient for checking connection status
             prompt = self.connection.find_prompt()
-            logger.debug(f"Connection health check - prompt: {prompt}")
             
-            # Test 3: Send a very simple command to verify responsiveness
-            if 'huawei' in self.device_type:
-                test_output = self.connection.send_command("display clock", delay_factor=1)
-            else:
-                test_output = self.connection.send_command("show clock", delay_factor=1)
+            if not prompt or len(prompt.strip()) == 0:
+                logger.debug("Connection health check - empty prompt detected")
+                return False
+                
+            logger.debug(f"Connection health check - active prompt: '{prompt.strip()}'")
             
-            logger.debug(f"Connection health check - test command successful")
-            return True
-            
+            # Test 3: Optional lightweight command test (only if needed)
+            # Use a very simple command that works on all device types
+            try:
+                # This is a minimal test that doesn't add much overhead
+                test_command = "display clock" if 'huawei' in self.device_type else "show clock"
+                test_output = self.connection.send_command(test_command, delay_factor=1, max_loops=20)
+                
+                if test_output and len(test_output.strip()) > 0:
+                    logger.debug("Connection health check - test command responsive")
+                    return True
+                else:
+                    logger.debug("Connection health check - test command returned empty output")
+                    return False
+                    
+            except Exception as cmd_error:
+                # If the command fails, but find_prompt worked, connection might still be okay
+                logger.debug(f"Test command failed but prompt detection worked: {cmd_error}")
+                return True  # find_prompt() success is usually sufficient
+                
         except Exception as e:
-            logger.warning(f"Connection health check failed: {e}")
+            logger.debug(f"Connection health check failed: {e}")
             return False
     
     def _reconnect_if_needed(self) -> bool:
@@ -315,89 +405,163 @@ class NetworkDeviceManager:
                     raise NetworkAutomationError(f"Configuration failed: {e}")
     
     def _execute_config_commands_internal(self, commands: List[str], device_type: str) -> str:
-        """Internal method to execute configuration commands."""
-        # Enter configuration mode based on device type
+        """Internal method to execute configuration commands using Netmiko built-in methods"""
+        
         if 'cisco' in device_type:
-            # Cisco devices: enter configure terminal mode
-            self.connection.config_mode()
-            output = self.connection.send_config_set(commands)
-            self.connection.exit_config_mode()
-            # Save configuration
-            save_output = self.connection.save_config()
-            return output + "\n" + save_output
-            
+            return self._execute_cisco_config(commands)
         elif 'huawei' in device_type:
-            # Huawei devices: try enable mode first, then fallback to manual system-view
-            entered_config_mode = False
+            return self._execute_huawei_config(commands)
+        else:
+            return self._execute_generic_config(commands)
+    
+    def _execute_cisco_config(self, commands: List[str]) -> str:
+        """Execute Cisco configuration using Netmiko's built-in methods"""
+        try:
+            # Check current prompt state
+            initial_prompt = self.connection.find_prompt()
+            logger.info(f"Cisco config - Initial prompt: '{initial_prompt}'")
             
+            # Ensure we're in enable mode before configuration
+            if not self.connection.check_enable_mode():
+                logger.info("Entering enable mode for Cisco configuration")
+                self.connection.enable()
+                enable_prompt = self.connection.find_prompt()
+                logger.info(f"Cisco config - Enable prompt: '{enable_prompt}'")
+            
+            # Use Netmiko's built-in configuration mode methods
+            logger.info(f"Executing {len(commands)} Cisco configuration commands")
+            
+            # Enter config mode, execute commands, and exit - all handled by Netmiko
+            config_output = self.connection.send_config_set(commands, delay_factor=2)
+            
+            # Verify we're back in enable mode after configuration
+            final_prompt = self.connection.find_prompt()
+            logger.info(f"Cisco config - Final prompt: '{final_prompt}'")
+            
+            # Save configuration using Netmiko's built-in method
+            logger.info("Saving Cisco configuration")
+            save_output = self.connection.save_config()
+            
+            return config_output + "\n\n--- SAVE OUTPUT ---\n" + save_output
+            
+        except Exception as e:
+            logger.error(f"Cisco configuration failed: {e}")
+            raise NetworkAutomationError(f"Cisco configuration failed: {e}")
+    
+    def _execute_huawei_config(self, commands: List[str]) -> str:
+        """Execute Huawei configuration using Netmiko's built-in methods with commit"""
+        try:
+            # Check current prompt state
+            initial_prompt = self.connection.find_prompt()
+            logger.info(f"Huawei config - Initial prompt: '{initial_prompt}'")
+            
+            # Try to use enable mode first, fallback to system-view
+            config_mode_entered = self._enter_huawei_config_mode()
+            
+            if not config_mode_entered:
+                raise NetworkAutomationError("Could not enter Huawei configuration mode")
+            
+            # Execute configuration commands using Netmiko's send_config_set
+            logger.info(f"Executing {len(commands)} Huawei configuration commands")
+            config_output = self.connection.send_config_set(
+                commands, 
+                delay_factor=3,  # Longer delay for Huawei
+                cmd_verify=False  # Disable verification for better performance
+            )
+            
+            # Exit configuration mode
+            self._exit_huawei_config_mode()
+            
+            # Commit and save configuration
+            commit_save_output = self._huawei_commit_and_save_enhanced()
+            
+            # Verify final prompt
+            final_prompt = self.connection.find_prompt()
+            logger.info(f"Huawei config - Final prompt: '{final_prompt}'")
+            
+            return config_output + "\n\n" + commit_save_output
+            
+        except Exception as e:
+            logger.error(f"Huawei configuration failed: {e}")
+            # Try to exit config mode if we're stuck
             try:
-                # Check current prompt
-                current_prompt = self.connection.find_prompt()
-                logger.info(f"Current prompt: {current_prompt}")
-                
-                # Try Netmiko's enable() method first (works with some Huawei devices)
+                self._exit_huawei_config_mode()
+            except:
+                pass
+            raise NetworkAutomationError(f"Huawei configuration failed: {e}")
+    
+    def _enter_huawei_config_mode(self) -> bool:
+        """Enter Huawei configuration mode using best available method"""
+        try:
+            # Method 1: Try Netmiko's enable() method first
+            if hasattr(self.connection, 'check_enable_mode') and hasattr(self.connection, 'enable'):
                 try:
                     if not self.connection.check_enable_mode():
-                        logger.info("Attempting to enter enable mode...")
+                        logger.info("Attempting Netmiko enable() for Huawei")
                         self.connection.enable()
-                        entered_config_mode = True
-                        logger.info("Successfully entered enable mode")
-                    else:
-                        logger.info("Already in enable mode")
-                        entered_config_mode = True
-                except Exception as enable_error:
-                    logger.info(f"Enable mode not supported or failed: {enable_error}")
-                    # Try manual system-view entry
-                    try:
-                        logger.info("Trying manual system-view entry...")
-                        result = self.connection.send_command("system-view")
-                        if "Error" not in result and "Unrecognized" not in result:
-                            entered_config_mode = True
-                            logger.info("Successfully entered system-view manually")
-                        else:
-                            logger.warning(f"System-view command returned error: {result}")
-                    except Exception as manual_error:
-                        logger.error(f"Manual system-view also failed: {manual_error}")
+                    
+                    if self.connection.check_enable_mode():
+                        enable_prompt = self.connection.find_prompt()
+                        logger.info(f"Huawei enable mode successful - prompt: '{enable_prompt}'")
+                        return True
                         
-                if not entered_config_mode:
-                    raise NetworkAutomationError("Could not enter configuration mode using either enable() or system-view")
-                
-            except NetworkAutomationError:
-                raise
-            except Exception as e:
-                logger.error(f"Configuration mode entry failed: {e}")
-                raise NetworkAutomationError(f"Failed to enter configuration mode: {e}")
+                except Exception as enable_error:
+                    logger.info(f"Netmiko enable() not supported for this Huawei device: {enable_error}")
             
-            # Use Netmiko's send_config_set for better reliability
-            try:
-                logger.info(f"Sending {len(commands)} configuration commands using send_config_set")
-                config_output = self.connection.send_config_set(commands, delay_factor=2)
+            # Method 2: Fallback to manual system-view
+            logger.info("Attempting manual system-view entry")
+            result = self.connection.send_command("system-view", delay_factor=2)
+            
+            if "Error" not in result and "Unrecognized" not in result:
+                system_prompt = self.connection.find_prompt()
+                logger.info(f"Huawei system-view successful - prompt: '{system_prompt}'")
+                return True
+            else:
+                logger.warning(f"System-view returned: {result[:100]}")
+                return False
                 
-                # Exit configuration mode properly
+        except Exception as e:
+            logger.error(f"Failed to enter Huawei config mode: {e}")
+            return False
+    
+    def _exit_huawei_config_mode(self):
+        """Exit Huawei configuration mode properly"""
+        try:
+            # Try Netmiko's exit_config_mode first
+            if hasattr(self.connection, 'exit_config_mode'):
                 try:
                     self.connection.exit_config_mode()
-                except Exception:
-                    # Manual fallback for exit
-                    try:
-                        self.connection.send_command("quit")
-                    except Exception:
-                        logger.warning("Could not exit configuration mode cleanly")
-                
-            except Exception as e:
-                logger.error(f"send_config_set failed: {e}")
-                # Fallback to individual command processing
-                return self._execute_commands_individually(commands, device_type)
+                    exit_prompt = self.connection.find_prompt()
+                    logger.info(f"Exited config mode via Netmiko - prompt: '{exit_prompt}'")
+                    return
+                except Exception as exit_error:
+                    logger.info(f"Netmiko exit_config_mode failed: {exit_error}")
             
-            # Commit and save configuration for Huawei
-            commit_output = self._huawei_commit_and_save()
+            # Fallback to manual quit
+            self.connection.send_command("quit")
+            quit_prompt = self.connection.find_prompt()
+            logger.info(f"Exited config mode via quit - prompt: '{quit_prompt}'")
             
-            return config_output + "\n\n" + commit_output
-            
-        else:
-            # Fallback to netmiko's default behavior
+        except Exception as e:
+            logger.warning(f"Could not exit config mode cleanly: {e}")
+    
+    def _execute_generic_config(self, commands: List[str]) -> str:
+        """Execute configuration for generic/other device types"""
+        try:
+            logger.info(f"Executing {len(commands)} generic configuration commands")
             output = self.connection.send_config_set(commands)
-            save_output = self.connection.save_config()
-            return output + "\n" + save_output
+            
+            # Try to save if the method exists
+            try:
+                save_output = self.connection.save_config()
+                return output + "\n\n--- SAVE OUTPUT ---\n" + save_output
+            except Exception:
+                logger.info("save_config() not available for this device type")
+                return output
+                
+        except Exception as e:
+            logger.error(f"Generic configuration failed: {e}")
+            raise NetworkAutomationError(f"Configuration failed: {e}")
     
     def _execute_commands_individually(self, commands: List[str], device_type: str) -> str:
         """Fallback method to execute commands individually when send_config_set fails."""
@@ -426,54 +590,161 @@ class NetworkDeviceManager:
         
         return config_output
     
-    def _huawei_commit_and_save(self) -> str:
-        """Handle Huawei commit and save operations with built-in prompt handling."""
+    def _huawei_commit_and_save_enhanced(self) -> str:
+        """Enhanced Huawei commit and save using Netmiko built-in methods where possible"""
         output_parts = []
         
-        # Commit configuration
-        try:
-            logger.info("Committing Huawei configuration...")
-            # Use send_command with expect_string for Y/N/C prompts
-            commit_output = self.connection.send_command(
-                "commit", 
-                expect_string=r'[\[\(].*[YyNnCc].*[\]\)]|#|>',
-                delay_factor=3
-            )
-            
-            # Check if we got a confirmation prompt
-            if any(prompt in commit_output.lower() for prompt in ['y/n/c', '[y/n/c]', '(y/n/c)']):
-                logger.info("Responding 'Y' to commit confirmation")
-                confirm_output = self.connection.send_command("Y")
-                commit_output += "\n" + confirm_output
-            
+        # Try Netmiko's commit method first (if available)
+        commit_success = self._try_netmiko_commit()
+        if commit_success:
+            output_parts.append("--- COMMIT OUTPUT ---\nConfiguration committed successfully via Netmiko")
+        else:
+            # Fallback to manual commit handling
+            commit_output = self._manual_huawei_commit()
             output_parts.append(f"--- COMMIT OUTPUT ---\n{commit_output}")
-            
-        except Exception as e:
-            logger.error(f"Commit failed: {e}")
-            output_parts.append(f"--- COMMIT OUTPUT ---\nCommit failed: {e}")
         
-        # Save configuration
-        try:
-            logger.info("Saving Huawei configuration...")
-            save_output = self.connection.send_command(
-                "save",
-                expect_string=r'[\[\(].*[YyNnCc].*[\]\)]|#|>',
-                delay_factor=3
-            )
-            
-            # Check if we got a confirmation prompt
-            if any(prompt in save_output.lower() for prompt in ['y/n/c', '[y/n/c]', '(y/n/c)', 'y/n']):
-                logger.info("Responding 'Y' to save confirmation")
-                save_confirm_output = self.connection.send_command("Y")
-                save_output += "\n" + save_confirm_output
-            
-            output_parts.append(f"--- SAVE OUTPUT ---\n{save_output}")
-            
-        except Exception as e:
-            logger.error(f"Save failed: {e}")
-            output_parts.append(f"--- SAVE OUTPUT ---\nSave failed: {e}")
+        # Handle save operation
+        save_output = self._huawei_save_config()
+        output_parts.append(f"--- SAVE OUTPUT ---\n{save_output}")
         
         return "\n\n".join(output_parts)
+    
+    def _try_netmiko_commit(self) -> bool:
+        """Try to use Netmiko's built-in commit method for Huawei"""
+        try:
+            if hasattr(self.connection, 'commit'):
+                logger.info("Attempting Huawei commit using Netmiko's built-in method")
+                
+                # Some versions of Netmiko have a commit() method for Huawei devices
+                result = self.connection.commit()
+                
+                if result and "error" not in result.lower():
+                    logger.info("Netmiko commit() successful")
+                    return True
+                else:
+                    logger.info(f"Netmiko commit() returned: {result}")
+                    return False
+            else:
+                logger.debug("Netmiko commit() method not available")
+                return False
+                
+        except Exception as e:
+            logger.info(f"Netmiko commit() failed: {e}")
+            return False
+    
+    def _manual_huawei_commit(self) -> str:
+        """Manual Huawei commit handling with improved prompt detection"""
+        try:
+            logger.info("Performing manual Huawei commit...")
+            
+            # Get current prompt before commit
+            pre_commit_prompt = self.connection.find_prompt()
+            logger.info(f"Pre-commit prompt: '{pre_commit_prompt}'")
+            
+            # Send commit command with enhanced expect patterns
+            commit_output = self.connection.send_command(
+                "commit", 
+                expect_string=r'[\[\(].*[YyNnCc].*[\]\)]|#|>|\]$',
+                delay_factor=4,
+                max_loops=50
+            )
+            
+            # Enhanced confirmation prompt detection
+            confirmation_patterns = [
+                'y/n/c', '[y/n/c]', '(y/n/c)', 
+                'y/n', '[y/n]', '(y/n)',
+                'confirm', 'continue', 'proceed'
+            ]
+            
+            needs_confirmation = any(pattern in commit_output.lower() for pattern in confirmation_patterns)
+            
+            if needs_confirmation:
+                logger.info("Detected commit confirmation prompt, responding with 'Y'")
+                confirm_output = self.connection.send_command(
+                    "Y", 
+                    delay_factor=3,
+                    max_loops=30
+                )
+                commit_output += "\n" + confirm_output
+            
+            # Verify commit completion
+            post_commit_prompt = self.connection.find_prompt()
+            logger.info(f"Post-commit prompt: '{post_commit_prompt}'")
+            
+            return commit_output
+            
+        except Exception as e:
+            error_msg = f"Manual commit failed: {e}"
+            logger.error(error_msg)
+            return error_msg
+    
+    def _huawei_save_config(self) -> str:
+        """Enhanced Huawei save configuration with better error handling"""
+        try:
+            logger.info("Saving Huawei configuration...")
+            
+            # Get current prompt before save
+            pre_save_prompt = self.connection.find_prompt()
+            logger.info(f"Pre-save prompt: '{pre_save_prompt}'")
+            
+            # Try Netmiko's save_config first
+            try:
+                if hasattr(self.connection, 'save_config'):
+                    logger.info("Attempting save via Netmiko's save_config()")
+                    save_output = self.connection.save_config()
+                    
+                    if save_output and "error" not in save_output.lower():
+                        logger.info("Netmiko save_config() successful")
+                        return save_output
+                    else:
+                        logger.info(f"Netmiko save_config() returned: {save_output[:100]}")
+                        # Fall through to manual save
+                        
+            except Exception as netmiko_save_error:
+                logger.info(f"Netmiko save_config() failed: {netmiko_save_error}")
+                # Fall through to manual save
+            
+            # Manual save handling
+            logger.info("Performing manual save operation")
+            save_output = self.connection.send_command(
+                "save",
+                expect_string=r'[\[\(].*[YyNnCc].*[\]\)]|#|>|\]$',
+                delay_factor=4,
+                max_loops=50
+            )
+            
+            # Enhanced confirmation detection for save
+            confirmation_patterns = [
+                'y/n/c', '[y/n/c]', '(y/n/c)',
+                'y/n', '[y/n]', '(y/n)',
+                'overwrite', 'confirm', 'continue'
+            ]
+            
+            needs_confirmation = any(pattern in save_output.lower() for pattern in confirmation_patterns)
+            
+            if needs_confirmation:
+                logger.info("Detected save confirmation prompt, responding with 'Y'")
+                confirm_output = self.connection.send_command(
+                    "Y",
+                    delay_factor=3,
+                    max_loops=30
+                )
+                save_output += "\n" + confirm_output
+            
+            # Verify save completion
+            post_save_prompt = self.connection.find_prompt()
+            logger.info(f"Post-save prompt: '{post_save_prompt}'")
+            
+            return save_output
+            
+        except Exception as e:
+            error_msg = f"Save operation failed: {e}"
+            logger.error(error_msg)
+            return error_msg
+    
+    def _huawei_commit_and_save(self) -> str:
+        """Legacy method - kept for backward compatibility"""
+        return self._huawei_commit_and_save_enhanced()
 
 
 class VLANManager:
@@ -2390,6 +2661,10 @@ def execute_network_task(device_params: Dict, task_type: str, parameters: Dict) 
             elif task_type == 'show_routes':
                 manager = RoutingManager(device)
                 result = manager.show_routes(parameters.get('vrf_name'))
+            
+            elif task_type == 'show_vrfs':
+                manager = VRFManager(device)
+                result = manager.show_vrfs()
             
             elif task_type == 'backup_config':
                 manager = DeviceInfoManager(device)

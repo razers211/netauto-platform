@@ -1637,3 +1637,181 @@ def multi_tenant_deployment(request):
         'title': 'Deploy Multi-Tenant Configuration'
     }
     return render(request, 'automation/multi_tenant_deployment_form.html', context)
+
+
+# API Views
+
+def api_task_status(request, task_id):
+    """API endpoint to get task status"""
+    try:
+        task = NetworkTask.objects.get(id=task_id)
+        data = {
+            'status': task.status,
+            'progress': getattr(task, 'progress', 0),
+            'message': task.error_message if task.status == 'failed' else ''
+        }
+        return JsonResponse(data)
+    except NetworkTask.DoesNotExist:
+        return JsonResponse({'error': 'Task not found'}, status=404)
+
+
+def api_device_interfaces(request, device_id):
+    """API endpoint to get device interfaces"""
+    try:
+        device = Device.objects.get(id=device_id, is_active=True)
+        
+        # Execute show interfaces command to get interface list
+        success, result, error = execute_network_task(
+            device.get_connection_params(),
+            'show_interfaces',
+            {}
+        )
+        
+        if success:
+            # Parse interfaces from the result
+            interfaces = parse_interfaces_from_output(result, device.device_type)
+            return JsonResponse({'interfaces': interfaces})
+        else:
+            return JsonResponse({'error': f'Failed to retrieve interfaces: {error}'}, status=500)
+            
+    except Device.DoesNotExist:
+        return JsonResponse({'error': 'Device not found'}, status=404)
+    except Exception as e:
+        return JsonResponse({'error': str(e)}, status=500)
+
+
+def api_device_vrfs(request, device_id):
+    """API endpoint to get device VRFs"""
+    try:
+        device = Device.objects.get(id=device_id, is_active=True)
+        
+        # Execute show VRF command to get VRF list
+        success, result, error = execute_network_task(
+            device.get_connection_params(),
+            'show_vrfs',
+            {}
+        )
+        
+        if success:
+            # Parse VRFs from the result
+            vrfs = parse_vrfs_from_output(result, device.device_type)
+            return JsonResponse({'vrfs': vrfs})
+        else:
+            return JsonResponse({'error': f'Failed to retrieve VRFs: {error}'}, status=500)
+            
+    except Device.DoesNotExist:
+        return JsonResponse({'error': 'Device not found'}, status=404)
+    except Exception as e:
+        return JsonResponse({'error': str(e)}, status=500)
+
+
+def parse_interfaces_from_output(output, device_type):
+    """Parse interface names from show interfaces output"""
+    interfaces = []
+    
+    if not output:
+        return interfaces
+    
+    lines = output.split('\n')
+    
+    try:
+        if device_type in ['huawei', 'huawei_vrpv8']:
+            # Huawei interface parsing
+            for line in lines:
+                line = line.strip()
+                if any(prefix in line for prefix in ['GigabitEthernet', '10GE', '25GE', '40GE', '100GE', 'Ethernet']):
+                    # Extract interface name (first word)
+                    parts = line.split()
+                    if parts:
+                        interface_name = parts[0]
+                        if interface_name not in interfaces:
+                            interfaces.append(interface_name)
+        
+        elif device_type in ['cisco_ios', 'cisco_xe']:
+            # Cisco interface parsing
+            for line in lines:
+                line = line.strip()
+                if any(prefix in line for prefix in ['GigabitEthernet', 'TenGigabitEthernet', 'FastEthernet', 'Ethernet']):
+                    # Extract interface name (first word)
+                    parts = line.split()
+                    if parts:
+                        interface_name = parts[0]
+                        if interface_name not in interfaces:
+                            interfaces.append(interface_name)
+        
+        elif device_type == 'juniper':
+            # Juniper interface parsing
+            for line in lines:
+                line = line.strip()
+                if any(prefix in line for prefix in ['ge-', 'xe-', 'et-', 'ae']):
+                    # Extract interface name (first word)
+                    parts = line.split()
+                    if parts:
+                        interface_name = parts[0]
+                        if interface_name not in interfaces:
+                            interfaces.append(interface_name)
+    
+    except Exception:
+        # Fallback: return empty list if parsing fails
+        pass
+    
+    return sorted(interfaces)
+
+
+def parse_vrfs_from_output(output, device_type):
+    """Parse VRF names from show VRF output"""
+    vrfs = []
+    
+    if not output:
+        return vrfs
+    
+    lines = output.split('\n')
+    
+    try:
+        if device_type in ['huawei', 'huawei_vrpv8']:
+            # Huawei VRF parsing
+            for line in lines:
+                line = line.strip()
+                # Skip headers and empty lines
+                if not line or 'VPN-Instance' in line or 'Name' in line or '----' in line:
+                    continue
+                # Extract VRF name (first column)
+                parts = line.split()
+                if parts and not parts[0].isdigit():
+                    vrf_name = parts[0]
+                    if vrf_name not in vrfs and vrf_name != 'Total':
+                        vrfs.append(vrf_name)
+        
+        elif device_type in ['cisco_ios', 'cisco_xe']:
+            # Cisco VRF parsing
+            for line in lines:
+                line = line.strip()
+                # Skip headers and empty lines
+                if not line or 'Name' in line or '----' in line:
+                    continue
+                # Extract VRF name (first column)
+                parts = line.split()
+                if parts:
+                    vrf_name = parts[0]
+                    if vrf_name not in vrfs:
+                        vrfs.append(vrf_name)
+        
+        elif device_type == 'juniper':
+            # Juniper VRF parsing
+            for line in lines:
+                line = line.strip()
+                if 'instance-type vrf' in line:
+                    # Extract VRF name from before "instance-type"
+                    parts = line.split()
+                    for i, part in enumerate(parts):
+                        if part == 'instance-type' and i > 0:
+                            vrf_name = parts[i-1]
+                            if vrf_name not in vrfs:
+                                vrfs.append(vrf_name)
+                            break
+    
+    except Exception:
+        # Fallback: return empty list if parsing fails
+        pass
+    
+    return sorted(vrfs)
