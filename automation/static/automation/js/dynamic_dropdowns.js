@@ -99,19 +99,16 @@ function loadVRFs(deviceId) {
         })
         .then(data => {
             vrfSelects.forEach(select => {
-                const isRequired = !select.hasAttribute('data-allow-empty');
-                
                 select.disabled = false;
                 select.innerHTML = '';
                 
-                // Add empty option for optional VRF fields
-                if (!isRequired) {
-                    const emptyOption = document.createElement('option');
-                    emptyOption.value = '';
-                    emptyOption.textContent = 'Global (no VRF)';
-                    select.appendChild(emptyOption);
-                }
+                // Always add Global (no VRF) option - VRF usage is typically optional
+                const globalOption = document.createElement('option');
+                globalOption.value = '';
+                globalOption.textContent = 'Global (no VRF)';
+                select.appendChild(globalOption);
                 
+                // Add actual VRFs if found
                 if (data.vrfs && data.vrfs.length > 0) {
                     data.vrfs.forEach(vrf => {
                         const option = document.createElement('option');
@@ -119,36 +116,42 @@ function loadVRFs(deviceId) {
                         option.textContent = vrf;
                         select.appendChild(option);
                     });
-                } else if (isRequired) {
-                    const option = document.createElement('option');
-                    option.value = '';
-                    option.textContent = 'No VRFs found';
-                    select.appendChild(option);
+                }
+                
+                // Add informational text if no VRFs found
+                if (!data.vrfs || data.vrfs.length === 0) {
+                    const infoOption = document.createElement('option');
+                    infoOption.value = '';
+                    infoOption.textContent = '--- No VRFs configured ---';
+                    infoOption.disabled = true;
+                    infoOption.style.fontStyle = 'italic';
+                    select.appendChild(infoOption);
                 }
             });
         })
         .catch(error => {
             console.error('Error loading VRFs:', error);
             vrfSelects.forEach(select => {
-                const isRequired = !select.hasAttribute('data-allow-empty');
-                
                 select.disabled = false;
                 select.innerHTML = '';
                 
-                if (!isRequired) {
-                    const emptyOption = document.createElement('option');
-                    emptyOption.value = '';
-                    emptyOption.textContent = 'Global (no VRF)';
-                    select.appendChild(emptyOption);
-                }
+                // Always provide Global (no VRF) option even on error
+                const globalOption = document.createElement('option');
+                globalOption.value = '';
+                globalOption.textContent = 'Global (no VRF)';
+                select.appendChild(globalOption);
                 
+                // Add error information
                 const errorOption = document.createElement('option');
                 errorOption.value = '';
-                errorOption.textContent = 'Error loading VRFs';
+                errorOption.textContent = '--- Error loading VRFs ---';
+                errorOption.disabled = true;
+                errorOption.style.color = 'red';
+                errorOption.style.fontStyle = 'italic';
                 select.appendChild(errorOption);
             });
             
-            showNotification('Failed to load VRFs. You can still select Global or manually configure VRFs first.', 'warning');
+            showNotification('Failed to load VRFs from device. Global (no VRF) is still available.', 'warning');
         });
 }
 
@@ -165,22 +168,23 @@ function clearDropdowns() {
     });
     
     vrfSelects.forEach(select => {
-        const isRequired = !select.hasAttribute('data-allow-empty');
         select.innerHTML = '';
         
-        if (!isRequired) {
-            const emptyOption = document.createElement('option');
-            emptyOption.value = '';
-            emptyOption.textContent = 'Select a device first';
-            select.appendChild(emptyOption);
-        } else {
-            const option = document.createElement('option');
-            option.value = '';
-            option.textContent = 'Select a device first';
-            select.appendChild(option);
-        }
+        // Always provide Global (no VRF) option
+        const globalOption = document.createElement('option');
+        globalOption.value = '';
+        globalOption.textContent = 'Global (no VRF)';
+        select.appendChild(globalOption);
         
-        select.disabled = true;
+        // Add informational option
+        const infoOption = document.createElement('option');
+        infoOption.value = '';
+        infoOption.textContent = '--- Select device to load VRFs ---';
+        infoOption.disabled = true;
+        infoOption.style.fontStyle = 'italic';
+        select.appendChild(infoOption);
+        
+        select.disabled = false;  // Keep enabled so users can select Global
     });
 }
 
