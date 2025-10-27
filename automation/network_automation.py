@@ -25,6 +25,109 @@ class NetworkDeviceManager:
     def __init__(self, device_params: Dict):
         self.device_params = device_params
         self.connection = None
+        self.device_type = device_params.get('device_type', '')
+        
+        # Enhance connection parameters for better reliability
+        self._enhance_connection_params()
+    
+    def _enhance_connection_params(self):
+        """Enhance connection parameters for better reliability"""
+        # Set longer timeouts for better stability (using compatible parameter names)
+        self.device_params.setdefault('timeout', 60)  # Connection timeout
+        
+        # Add session logging for debugging
+        self.device_params.setdefault('session_log', 'netmiko_session.log')
+        
+        # Huawei-specific enhancements
+        if 'huawei' in self.device_type:
+            # Add common Huawei prompt patterns and enable mode settings
+            self.device_params.setdefault('global_delay_factor', 2)
+            # Disable automatic screen length setting that can cause issues
+            self.device_params.setdefault('fast_cli', False)
+            
+            # Configure enable mode for Huawei (system-view)
+            # Many Huawei devices don't require enable password, but some do
+            if 'secret' not in self.device_params and 'enable_password' not in self.device_params:
+                # Try using the same password for enable mode
+                if 'password' in self.device_params:
+                    self.device_params['secret'] = self.device_params['password']
+    
+    def test_device_prompt(self) -> bool:
+        """Test device prompt detection and configure session settings"""
+        if not self.connection:
+            return False
+            
+        try:
+            # Try to get current prompt
+            prompt = self.connection.find_prompt()
+            logger.info(f"Device prompt detected: '{prompt}'")
+            
+            # For Huawei devices, test configuration access and configure session
+            if 'huawei' in self.device_type:
+                try:
+                    # Test configuration mode access
+                    logger.info("Testing Huawei configuration access...")
+                    
+                    # Try enable mode first, then manual system-view
+                    config_access_ok = False
+                    
+                    try:
+                        # Test enable mode if available
+                        if hasattr(self.connection, 'check_enable_mode'):
+                            if self.connection.check_enable_mode():
+                                logger.info("Already in enable mode")
+                                config_access_ok = True
+                            else:
+                                logger.info("Testing enable mode entry")
+                                self.connection.enable()
+                                config_access_ok = True
+                                logger.info("Enable mode works")
+                                # Exit back to user mode
+                                self.connection.exit_enable_mode()
+                        else:
+                            logger.info("Enable mode methods not available, testing system-view")
+                    except Exception as enable_error:
+                        logger.info(f"Enable mode not available: {enable_error}")
+                    
+                    # Test manual system-view if enable mode didn't work
+                    if not config_access_ok:
+                        try:
+                            result = self.connection.send_command("system-view")
+                            if "Error" not in result and "Unrecognized" not in result:
+                                config_access_ok = True
+                                logger.info("System-view access works")
+                                # Exit system-view
+                                self.connection.send_command("quit")
+                            else:
+                                logger.warning(f"System-view returned error: {result}")
+                        except Exception as sv_error:
+                            logger.warning(f"System-view test failed: {sv_error}")
+                    
+                    # Configure session settings for better reliability (in user mode)
+                    session_commands = [
+                        "screen-length 0 temporary",
+                        "undo terminal monitor"
+                    ]
+                    
+                    for cmd in session_commands:
+                        try:
+                            self.connection.send_command(cmd, delay_factor=1)
+                            logger.debug(f"Session command '{cmd}' executed")
+                        except Exception as cmd_error:
+                            logger.debug(f"Session command '{cmd}' failed (expected): {cmd_error}")
+                    
+                    if config_access_ok:
+                        logger.info("Huawei configuration access verified")
+                    else:
+                        logger.warning("Could not verify configuration access, but connection is working")
+                        
+                except Exception as e:
+                    logger.warning(f"Huawei configuration test failed, but connection seems OK: {e}")
+            
+            return True
+        except Exception as e:
+            logger.error(f"Prompt detection test failed: {e}")
+            return False
         
     def __enter__(self):
         self.connect()
@@ -38,7 +141,14 @@ class NetworkDeviceManager:
         try:
             self.connection = ConnectHandler(**self.device_params)
             logger.info(f"Connected to {self.device_params['host']}")
-            return True
+            
+            # Test prompt detection and setup session
+            if self.test_device_prompt():
+                logger.info("Device prompt detection successful")
+                return True
+            else:
+                logger.warning("Device prompt detection failed, but connection established")
+                return True  # Still return True as connection works
         except NetmikoTimeoutException as e:
             logger.error(f"Timeout connecting to {self.device_params['host']}: {e}")
             raise NetworkAutomationError(f"Connection timeout: {e}")
@@ -56,93 +166,314 @@ class NetworkDeviceManager:
             logger.info(f"Disconnected from {self.device_params['host']}")
     
     def execute_command(self, command: str, use_textfsm: bool = False) -> str:
-        """Execute a single command on the device."""
+        """Execute a single command on the device with connection recovery."""
         if not self.connection:
             raise NetworkAutomationError("Not connected to device")
         
         logger.info(f"Executing command: {command}")
-        try:
-            if use_textfsm:
-                output = self.connection.send_command(command, use_textfsm=True)
-            else:
-                output = self.connection.send_command(command)
+        max_retries = 2
+        
+        for attempt in range(max_retries + 1):
+            try:
+                # Check and restore connection if needed on retries
+                if attempt > 0:
+                    logger.info(f"Retry attempt {attempt} for command: {command}")
+                    self._reconnect_if_needed()
+                
+                # Try command execution with longer delay for Huawei devices
+                if 'huawei' in self.device_type:
+                    # Use longer delay for Huawei devices
+                    if use_textfsm:
+                        output = self.connection.send_command(command, use_textfsm=True, delay_factor=2)
+                    else:
+                        output = self.connection.send_command(command, delay_factor=2)
+                else:
+                    # Standard execution for other devices
+                    if use_textfsm:
+                        output = self.connection.send_command(command, use_textfsm=True)
+                    else:
+                        output = self.connection.send_command(command)
+                
+                logger.info(f"Command output length: {len(output) if output else 0} characters")
+                return output if output else "No output received from device"
+                
+            except Exception as e:
+                error_str = str(e).lower()
+                if ('socket is closed' in error_str or 'connection' in error_str or 
+                    'broken pipe' in error_str or 'timeout' in error_str) and attempt < max_retries:
+                    logger.warning(f"Connection error on attempt {attempt + 1}: {e}. Retrying...")
+                    time.sleep(1)  # Brief pause before retry
+                    continue
+                else:
+                    # Final attempt failed or non-connection error
+                    logger.error(f"Command failed after {attempt + 1} attempts: {e}")
+                    raise NetworkAutomationError(f"Command failed: {e}")
+    
+    def _check_connection_health(self) -> bool:
+        """Check if connection is healthy with multiple tests."""
+        if not self.connection:
+            return False
             
-            logger.info(f"Command output length: {len(output) if output else 0} characters")
-            return output if output else "No output received from device"
+        try:
+            # Test 1: Check if connection object exists and is connected
+            if not hasattr(self.connection, 'remote_conn') or not self.connection.remote_conn:
+                logger.warning("Connection object is not properly connected")
+                return False
+            
+            # Test 2: Try to find prompt
+            prompt = self.connection.find_prompt()
+            logger.debug(f"Connection health check - prompt: {prompt}")
+            
+            # Test 3: Send a very simple command to verify responsiveness
+            if 'huawei' in self.device_type:
+                test_output = self.connection.send_command("display clock", delay_factor=1)
+            else:
+                test_output = self.connection.send_command("show clock", delay_factor=1)
+            
+            logger.debug(f"Connection health check - test command successful")
+            return True
             
         except Exception as e:
-            logger.error(f"Command execution failed: {e}")
-            raise NetworkAutomationError(f"Command failed: {e}")
+            logger.warning(f"Connection health check failed: {e}")
+            return False
+    
+    def _reconnect_if_needed(self) -> bool:
+        """Check if connection is alive and reconnect if needed with multiple attempts."""
+        max_reconnect_attempts = 3
+        
+        # First check if we're actually disconnected
+        if self._check_connection_health():
+            logger.debug("Connection is healthy, no reconnection needed")
+            return True
+        
+        logger.warning("Connection health check failed. Attempting to reconnect...")
+        
+        for attempt in range(max_reconnect_attempts):
+            try:
+                # Clean up existing connection
+                if self.connection:
+                    try:
+                        self.connection.disconnect()
+                    except:
+                        pass
+                    self.connection = None
+                
+                # Wait a bit before reconnecting (especially on retries)
+                if attempt > 0:
+                    wait_time = 2 ** attempt  # Exponential backoff: 2, 4, 8 seconds
+                    logger.info(f"Waiting {wait_time}s before reconnection attempt {attempt + 1}")
+                    time.sleep(wait_time)
+                
+                # Attempt to reconnect
+                logger.info(f"Reconnection attempt {attempt + 1}/{max_reconnect_attempts} to {self.device_params['host']}")
+                self.connection = ConnectHandler(**self.device_params)
+                
+                # Verify the new connection works
+                if self._check_connection_health():
+                    logger.info(f"Successfully reconnected to {self.device_params['host']} on attempt {attempt + 1}")
+                    # Re-setup the session
+                    self.test_device_prompt()
+                    return True
+                else:
+                    logger.warning(f"Reconnection attempt {attempt + 1} succeeded but health check failed")
+                    
+            except Exception as reconnect_error:
+                logger.warning(f"Reconnection attempt {attempt + 1} failed: {reconnect_error}")
+                if attempt == max_reconnect_attempts - 1:
+                    logger.error(f"All {max_reconnect_attempts} reconnection attempts failed")
+                    raise NetworkAutomationError(f"Connection lost and reconnection failed after {max_reconnect_attempts} attempts: {reconnect_error}")
+        
+        return False
     
     def execute_config_commands(self, commands: List[str]) -> str:
-        """Execute configuration commands on the device."""
+        """Execute configuration commands on the device with connection recovery."""
         if not self.connection:
             raise NetworkAutomationError("Not connected to device")
         
         device_type = self.device_params.get('device_type', '')
+        max_retries = 2
+        
+        for attempt in range(max_retries + 1):
+            try:
+                # Check and restore connection if needed
+                if attempt > 0:
+                    logger.info(f"Retry attempt {attempt} for configuration commands")
+                    self._reconnect_if_needed()
+                
+                return self._execute_config_commands_internal(commands, device_type)
+                
+            except Exception as e:
+                error_str = str(e).lower()
+                if ('socket is closed' in error_str or 'connection' in error_str or 
+                    'broken pipe' in error_str or 'timeout' in error_str) and attempt < max_retries:
+                    logger.warning(f"Connection error on attempt {attempt + 1}: {e}. Retrying...")
+                    time.sleep(2)  # Brief pause before retry
+                    continue
+                else:
+                    # Final attempt failed or non-connection error
+                    logger.error(f"Configuration failed after {attempt + 1} attempts: {e}")
+                    raise NetworkAutomationError(f"Configuration failed: {e}")
+    
+    def _execute_config_commands_internal(self, commands: List[str], device_type: str) -> str:
+        """Internal method to execute configuration commands."""
+        # Enter configuration mode based on device type
+        if 'cisco' in device_type:
+            # Cisco devices: enter configure terminal mode
+            self.connection.config_mode()
+            output = self.connection.send_config_set(commands)
+            self.connection.exit_config_mode()
+            # Save configuration
+            save_output = self.connection.save_config()
+            return output + "\n" + save_output
+            
+        elif 'huawei' in device_type:
+            # Huawei devices: try enable mode first, then fallback to manual system-view
+            entered_config_mode = False
+            
+            try:
+                # Check current prompt
+                current_prompt = self.connection.find_prompt()
+                logger.info(f"Current prompt: {current_prompt}")
+                
+                # Try Netmiko's enable() method first (works with some Huawei devices)
+                try:
+                    if not self.connection.check_enable_mode():
+                        logger.info("Attempting to enter enable mode...")
+                        self.connection.enable()
+                        entered_config_mode = True
+                        logger.info("Successfully entered enable mode")
+                    else:
+                        logger.info("Already in enable mode")
+                        entered_config_mode = True
+                except Exception as enable_error:
+                    logger.info(f"Enable mode not supported or failed: {enable_error}")
+                    # Try manual system-view entry
+                    try:
+                        logger.info("Trying manual system-view entry...")
+                        result = self.connection.send_command("system-view")
+                        if "Error" not in result and "Unrecognized" not in result:
+                            entered_config_mode = True
+                            logger.info("Successfully entered system-view manually")
+                        else:
+                            logger.warning(f"System-view command returned error: {result}")
+                    except Exception as manual_error:
+                        logger.error(f"Manual system-view also failed: {manual_error}")
+                        
+                if not entered_config_mode:
+                    raise NetworkAutomationError("Could not enter configuration mode using either enable() or system-view")
+                
+            except NetworkAutomationError:
+                raise
+            except Exception as e:
+                logger.error(f"Configuration mode entry failed: {e}")
+                raise NetworkAutomationError(f"Failed to enter configuration mode: {e}")
+            
+            # Use Netmiko's send_config_set for better reliability
+            try:
+                logger.info(f"Sending {len(commands)} configuration commands using send_config_set")
+                config_output = self.connection.send_config_set(commands, delay_factor=2)
+                
+                # Exit configuration mode properly
+                try:
+                    self.connection.exit_config_mode()
+                except Exception:
+                    # Manual fallback for exit
+                    try:
+                        self.connection.send_command("quit")
+                    except Exception:
+                        logger.warning("Could not exit configuration mode cleanly")
+                
+            except Exception as e:
+                logger.error(f"send_config_set failed: {e}")
+                # Fallback to individual command processing
+                return self._execute_commands_individually(commands, device_type)
+            
+            # Commit and save configuration for Huawei
+            commit_output = self._huawei_commit_and_save()
+            
+            return config_output + "\n\n" + commit_output
+            
+        else:
+            # Fallback to netmiko's default behavior
+            output = self.connection.send_config_set(commands)
+            save_output = self.connection.save_config()
+            return output + "\n" + save_output
+    
+    def _execute_commands_individually(self, commands: List[str], device_type: str) -> str:
+        """Fallback method to execute commands individually when send_config_set fails."""
+        config_output = ""
         
         try:
-            # Enter configuration mode based on device type
-            if 'cisco' in device_type:
-                # Cisco devices: enter configure terminal mode
-                self.connection.config_mode()
-                output = self.connection.send_config_set(commands)
-                self.connection.exit_config_mode()
-                # Save configuration
-                save_output = self.connection.save_config()
-                return output + "\n" + save_output
-                
-            elif 'huawei' in device_type:
-                # Huawei devices: enter system-view mode
-                self.connection.send_command("system-view")
-                
-                # Send configuration commands
-                config_output = ""
-                for command in commands:
-                    try:
-                        cmd_output = self.connection.send_command(command)
-                        config_output += f"{command}: {cmd_output}\n"
-                    except Exception as e:
-                        logger.warning(f"Command '{command}' failed: {e}")
-                        config_output += f"{command}: ERROR - {e}\n"
-                
-                # Exit system-view
-                self.connection.send_command("quit")
-                
-                # Commit configuration first (Huawei requirement)
-                try:
-                    commit_output = self.connection.send_command("commit")
-                except Exception as e:
-                    commit_output = f"Commit failed: {e}"
-                
-                # Save configuration
-                try:
-                    save_output = self.connection.send_command("save")
-                    # Handle save confirmation
-                    if "Y/N" in save_output or "y/n" in save_output or "overwrite" in save_output.lower():
-                        save_output += "\n" + self.connection.send_command("y")
-                except Exception as e:
-                    save_output = f"Save failed: {e}"
-                
-                return config_output + f"\n\n--- COMMIT OUTPUT ---\n{commit_output}\n\n--- SAVE OUTPUT ---\n{save_output}"
-                
-            else:
-                # Fallback to netmiko's default behavior
-                output = self.connection.send_config_set(commands)
-                save_output = self.connection.save_config()
-                return output + "\n" + save_output
-                
+            # Try to enter system-view manually
+            self.connection.send_command("system-view")
         except Exception as e:
-            logger.error(f"Configuration failed: {e}")
-            # Try to exit config mode if we're stuck
+            logger.warning(f"Could not enter system-view manually: {e}")
+        
+        # Process commands individually
+        for command in commands:
             try:
-                if 'cisco' in device_type:
-                    self.connection.exit_config_mode()
-                elif 'huawei' in device_type:
-                    self.connection.send_command("quit")
-            except:
-                pass
-            raise NetworkAutomationError(f"Configuration failed: {e}")
+                cmd_output = self.connection.send_command(command, delay_factor=2)
+                config_output += f"{command}: {cmd_output}\n"
+            except Exception as e:
+                logger.warning(f"Command '{command}' failed: {e}")
+                config_output += f"{command}: ERROR - {e}\n"
+        
+        # Try to exit configuration mode
+        try:
+            self.connection.send_command("quit")
+        except Exception:
+            pass
+        
+        return config_output
+    
+    def _huawei_commit_and_save(self) -> str:
+        """Handle Huawei commit and save operations with built-in prompt handling."""
+        output_parts = []
+        
+        # Commit configuration
+        try:
+            logger.info("Committing Huawei configuration...")
+            # Use send_command with expect_string for Y/N/C prompts
+            commit_output = self.connection.send_command(
+                "commit", 
+                expect_string=r'[\[\(].*[YyNnCc].*[\]\)]|#|>',
+                delay_factor=3
+            )
+            
+            # Check if we got a confirmation prompt
+            if any(prompt in commit_output.lower() for prompt in ['y/n/c', '[y/n/c]', '(y/n/c)']):
+                logger.info("Responding 'Y' to commit confirmation")
+                confirm_output = self.connection.send_command("Y")
+                commit_output += "\n" + confirm_output
+            
+            output_parts.append(f"--- COMMIT OUTPUT ---\n{commit_output}")
+            
+        except Exception as e:
+            logger.error(f"Commit failed: {e}")
+            output_parts.append(f"--- COMMIT OUTPUT ---\nCommit failed: {e}")
+        
+        # Save configuration
+        try:
+            logger.info("Saving Huawei configuration...")
+            save_output = self.connection.send_command(
+                "save",
+                expect_string=r'[\[\(].*[YyNnCc].*[\]\)]|#|>',
+                delay_factor=3
+            )
+            
+            # Check if we got a confirmation prompt
+            if any(prompt in save_output.lower() for prompt in ['y/n/c', '[y/n/c]', '(y/n/c)', 'y/n']):
+                logger.info("Responding 'Y' to save confirmation")
+                save_confirm_output = self.connection.send_command("Y")
+                save_output += "\n" + save_confirm_output
+            
+            output_parts.append(f"--- SAVE OUTPUT ---\n{save_output}")
+            
+        except Exception as e:
+            logger.error(f"Save failed: {e}")
+            output_parts.append(f"--- SAVE OUTPUT ---\nSave failed: {e}")
+        
+        return "\n\n".join(output_parts)
 
 
 class VLANManager:
@@ -449,12 +780,18 @@ class RoutingManager:
         mask = '.'.join(mask_parts)
         return self._mask_to_prefix(mask)
     
-    def show_routes(self) -> str:
-        """Show routing table."""
+    def show_routes(self, vrf_name: str = None) -> str:
+        """Show routing table, optionally for a specific VRF."""
         if 'cisco' in self.device_type:
-            return self.device.execute_command("show ip route")
+            if vrf_name:
+                return self.device.execute_command(f"show ip route vrf {vrf_name}")
+            else:
+                return self.device.execute_command("show ip route")
         elif 'huawei' in self.device_type:
-            return self.device.execute_command("display ip routing-table")
+            if vrf_name:
+                return self.device.execute_command(f"display ip routing-table vpn-instance {vrf_name}")
+            else:
+                return self.device.execute_command("display ip routing-table")
         else:
             raise NetworkAutomationError(f"Unsupported device type: {self.device_type}")
 
@@ -1123,11 +1460,48 @@ class AdvancedOSPFManager:
         
         return self.device.execute_config_commands(commands)
     
+    def configure_ospf_redistribution(self, process_id: int, protocol: str, metric: int = None, 
+                                    metric_type: int = None, vrf_name: str = None) -> str:
+        """Configure OSPF redistribution."""
+        if 'cisco' in self.device_type:
+            if vrf_name:
+                commands = [f"router ospf {process_id} vrf {vrf_name}"]
+            else:
+                commands = [f"router ospf {process_id}"]
+            
+            cmd = f"redistribute {protocol}"
+            if metric:
+                cmd += f" metric {metric}"
+            if metric_type:
+                cmd += f" metric-type {metric_type}"
+            commands.append(cmd)
+            
+        elif 'huawei' in self.device_type:
+            if vrf_name:
+                commands = [f"ospf {process_id} vpn-instance {vrf_name}"]
+            else:
+                commands = [f"ospf {process_id}"]
+            
+            cmd = f"import-route {protocol}"
+            if metric:
+                cmd += f" cost {metric}"
+            if metric_type:
+                cmd += f" type {metric_type}"
+            commands.extend([cmd, "quit"])
+        else:
+            raise NetworkAutomationError(f"Unsupported device type: {self.device_type}")
+        
+        return self.device.execute_config_commands(commands)
+    
     def _mask_to_prefix(self, mask: str) -> int:
         """Convert subnet mask to prefix length."""
         mask_parts = mask.split('.')
         binary = ''.join([bin(int(part))[2:].zfill(8) for part in mask_parts])
         return binary.count('1')
+
+
+# Create alias for backward compatibility
+OSPFManager = AdvancedOSPFManager
 
 
 class EVPNManager:
@@ -1332,6 +1706,232 @@ class DataCenterFabricManager:
         if 'huawei' not in self.device_type:
             raise NetworkAutomationError("DataCenter Fabric configuration is only supported on Huawei devices")
     
+    def _validate_huawei_connection(self, strict: bool = False) -> bool:
+        """Test basic connectivity and Huawei command syntax before large operations."""
+        validation_results = []
+        
+        try:
+            logger.info("Validating Huawei device connectivity and command syntax...")
+            
+            # Test 1: Basic connectivity with simple commands
+            test_commands = [
+                ("display clock", "Clock display test"),
+                ("display version", "Version information test")
+            ]
+            
+            for cmd, description in test_commands:
+                try:
+                    result = self.device.execute_command(cmd)
+                    if result and len(result.strip()) > 5:
+                        logger.info(f"✓ {description}: PASSED ({len(result)} chars)")
+                        validation_results.append(True)
+                    else:
+                        logger.warning(f"✗ {description}: FAILED - Minimal output: '{result[:50]}'")
+                        validation_results.append(False)
+                except Exception as e:
+                    logger.warning(f"✗ {description}: FAILED - {e}")
+                    validation_results.append(False)
+            
+            # Test 2: Configuration mode access
+            try:
+                logger.info("Testing system-view access...")
+                result = self.device.execute_command("system-view")
+                if "Error" in result or "Unrecognized" in result:
+                    logger.warning(f"✗ System-view test: FAILED - {result[:100]}")
+                    validation_results.append(False)
+                else:
+                    logger.info(f"✓ System-view test: PASSED")
+                    validation_results.append(True)
+                
+                # Try to exit cleanly
+                try:
+                    self.device.execute_command("quit")
+                except:
+                    pass
+                    
+            except Exception as e:
+                logger.warning(f"✗ System-view test: FAILED - {e}")
+                validation_results.append(False)
+            
+            # Test 3: Interface command syntax
+            try:
+                logger.info("Testing interface command syntax...")
+                # Test with a common interface that should exist
+                result = self.device.execute_command("display interface brief")
+                if result and len(result) > 20:
+                    logger.info(f"✓ Interface command test: PASSED")
+                    validation_results.append(True)
+                else:
+                    logger.warning(f"✗ Interface command test: FAILED - {result[:50]}")
+                    validation_results.append(False)
+            except Exception as e:
+                logger.warning(f"✗ Interface command test: FAILED - {e}")
+                validation_results.append(False)
+            
+            # Summarize results
+            passed = sum(validation_results)
+            total = len(validation_results)
+            success_rate = (passed / total) * 100 if total > 0 else 0
+            
+            logger.info(f"Device validation summary: {passed}/{total} tests passed ({success_rate:.1f}%)")
+            
+            if strict:
+                # All tests must pass for strict validation
+                return all(validation_results)
+            else:
+                # At least 50% of tests must pass for lenient validation
+                return success_rate >= 50
+                
+        except Exception as e:
+            logger.error(f"Device validation failed with exception: {e}")
+            return False
+    
+    def diagnose_device_connectivity(self) -> str:
+        """Comprehensive device diagnostic to help troubleshoot connection issues."""
+        diagnostics = []
+        diagnostics.append("=== DEVICE CONNECTIVITY DIAGNOSTICS ===")
+        
+        # Test 1: Connection Health
+        try:
+            if self.device._check_connection_health():
+                diagnostics.append("✓ Connection health: HEALTHY")
+            else:
+                diagnostics.append("✗ Connection health: UNHEALTHY")
+        except Exception as e:
+            diagnostics.append(f"✗ Connection health check failed: {e}")
+        
+        # Test 2: Basic Commands
+        basic_commands = [
+            "display version",
+            "display clock", 
+            "display current-configuration | include sysname",
+            "display interface brief"
+        ]
+        
+        for cmd in basic_commands:
+            try:
+                result = self.device.execute_command(cmd)
+                if result and len(result.strip()) > 0:
+                    diagnostics.append(f"✓ '{cmd}': SUCCESS ({len(result)} chars)")
+                    # Show first line of output for context
+                    first_line = result.strip().split('\n')[0][:60]
+                    diagnostics.append(f"  Output preview: {first_line}")
+                else:
+                    diagnostics.append(f"✗ '{cmd}': FAILED - No output")
+            except Exception as e:
+                diagnostics.append(f"✗ '{cmd}': FAILED - {str(e)[:100]}")
+        
+        # Test 3: System View Access
+        try:
+            result = self.device.execute_command("system-view")
+            if "Error" not in result and "Unrecognized" not in result:
+                diagnostics.append("✓ System-view access: SUCCESS")
+                # Try to exit
+                try:
+                    self.device.execute_command("quit")
+                    diagnostics.append("✓ Exit from system-view: SUCCESS")
+                except:
+                    diagnostics.append("⚠ Exit from system-view: WARNING - May still be in config mode")
+            else:
+                diagnostics.append(f"✗ System-view access: FAILED - {result[:100]}")
+        except Exception as e:
+            diagnostics.append(f"✗ System-view access: FAILED - {e}")
+        
+        # Test 4: Device Type Detection
+        device_type = self.device.device_params.get('device_type', 'unknown')
+        diagnostics.append(f"Device type configured: {device_type}")
+        
+        # Test 5: Connection Parameters
+        host = self.device.device_params.get('host', 'unknown')
+        username = self.device.device_params.get('username', 'unknown')
+        diagnostics.append(f"Connection target: {username}@{host}")
+        
+        diagnostics.append("=== END DIAGNOSTICS ===")
+        
+        return "\n".join(diagnostics)
+    
+    def _execute_commands_in_chunks(self, commands: List[str], chunk_size: int = 8) -> str:
+        """Execute large command sets in smaller chunks with connection recovery."""
+        results = []
+        total_chunks = (len(commands) - 1) // chunk_size + 1
+        failed_chunks = 0
+        
+        logger.info(f"Executing {len(commands)} commands in {total_chunks} chunks of {chunk_size}")
+        
+        for i in range(0, len(commands), chunk_size):
+            chunk = commands[i:i + chunk_size]
+            chunk_num = i // chunk_size + 1
+            
+            logger.info(f"Processing chunk {chunk_num}/{total_chunks} ({len(chunk)} commands)")
+            
+            # Try chunk execution with multiple attempts and connection recovery
+            chunk_success = False
+            max_chunk_retries = 3
+            
+            for attempt in range(max_chunk_retries):
+                try:
+                    # Check and restore connection before each chunk (especially after failures)
+                    if attempt > 0 or failed_chunks > 0:
+                        logger.info(f"Checking connection health before chunk {chunk_num}, attempt {attempt + 1}")
+                        if not self.device._check_connection_health():
+                            logger.warning(f"Connection unhealthy, attempting to reconnect for chunk {chunk_num}")
+                            self.device._reconnect_if_needed()
+                            # Give device time to stabilize after reconnection
+                            time.sleep(2)
+                    
+                    result = self.device.execute_config_commands(chunk)
+                    results.append(f"--- CHUNK {chunk_num} ---\n{result}")
+                    chunk_success = True
+                    logger.info(f"Chunk {chunk_num} completed successfully")
+                    break
+                    
+                except Exception as e:
+                    error_str = str(e).lower()
+                    if ('socket is closed' in error_str or 'connection' in error_str or 
+                        'broken pipe' in error_str) and attempt < max_chunk_retries - 1:
+                        logger.warning(f"Chunk {chunk_num} attempt {attempt + 1} failed with connection error: {e}. Retrying...")
+                        time.sleep(2)  # Longer pause before retry
+                        continue
+                    else:
+                        logger.error(f"Chunk {chunk_num} failed after {attempt + 1} attempts: {e}")
+                        results.append(f"--- CHUNK {chunk_num} FAILED ---\nError: {e}")
+                        break
+            
+            if not chunk_success:
+                failed_chunks += 1
+                logger.warning(f"Chunk {chunk_num} could not be completed after {max_chunk_retries} attempts")
+                # Try to reconnect for next chunk
+                try:
+                    logger.info("Attempting connection recovery for next chunk...")
+                    self.device._reconnect_if_needed()
+                except Exception as reconnect_error:
+                    logger.error(f"Connection recovery failed: {reconnect_error}")
+            
+            # Pause between chunks to let the device process and recover
+            if chunk_num < total_chunks:
+                # Adaptive pause based on failure rate and chunk processing
+                base_pause = 1
+                failure_penalty = min(failed_chunks * 0.5, 3)  # Up to 3 extra seconds for failures
+                pause_time = base_pause + failure_penalty
+                
+                logger.info(f"Pausing {pause_time:.1f}s before next chunk (base: {base_pause}s, failure penalty: {failure_penalty:.1f}s)...")
+                time.sleep(pause_time)
+                
+                # Periodic connection health check every 5 chunks
+                if chunk_num % 5 == 0:
+                    logger.info(f"Periodic connection health check after chunk {chunk_num}")
+                    if not self.device._check_connection_health():
+                        logger.warning("Periodic health check failed, preemptively reconnecting")
+                        try:
+                            self.device._reconnect_if_needed()
+                        except Exception as e:
+                            logger.warning(f"Preemptive reconnection failed: {e}")
+        
+        success_rate = ((total_chunks - failed_chunks) / total_chunks) * 100
+        summary = f"\n\n=== EXECUTION SUMMARY ===\nTotal chunks: {total_chunks}\nSuccessful: {total_chunks - failed_chunks}\nFailed: {failed_chunks}\nSuccess rate: {success_rate:.1f}%"
+        
+        return "\n\n".join(results) + summary
+    
     def configure_spine_underlay(self, router_id: str, as_number: int, spine_interfaces: list,
                                 spine_ip_range: str = "10.0.0.0/30") -> str:
         """Configure spine switch underlay (BGP + OSPF)."""
@@ -1339,7 +1939,7 @@ class DataCenterFabricManager:
             # Configure OSPF for underlay
             "ospf 1",
             f"router-id {router_id}",
-            "area 0",
+            "area 0.0.0.0",  # Use dotted decimal format
             "quit",
             "quit",
             
@@ -1365,8 +1965,8 @@ class DataCenterFabricManager:
             base_ip = self._calculate_spine_ip(spine_ip_range, idx)
             commands.extend([
                 f"interface {interface}",
-                f"ip address {base_ip} 30",
-                "ospf enable area 0",
+                f"ip address {base_ip} 255.255.255.252",  # Use subnet mask instead of prefix
+                "ospf enable 1 area 0.0.0.0",  # Correct OSPF syntax
                 "undo shutdown",
                 "quit"
             ])
@@ -1374,12 +1974,16 @@ class DataCenterFabricManager:
         # Configure loopback
         commands.extend([
             "interface LoopBack0",
-            f"ip address {router_id} 32",
-            "ospf enable area 0",
+            f"ip address {router_id} 255.255.255.255",  # Use subnet mask instead of prefix
+            "ospf enable 1 area 0.0.0.0",  # Correct OSPF syntax
             "quit"
         ])
         
-        return self.device.execute_config_commands(commands)
+        # Use chunked execution for large command sets to prevent timeouts
+        if len(commands) > 15:
+            return self._execute_commands_in_chunks(commands, chunk_size=8)
+        else:
+            return self.device.execute_config_commands(commands)
     
     def configure_leaf_underlay(self, router_id: str, as_number: int, spine_interfaces: list,
                                leaf_id: int, spine_ip_range: str = "10.0.0.0/30") -> str:
@@ -1388,7 +1992,7 @@ class DataCenterFabricManager:
             # Configure OSPF for underlay
             "ospf 1",
             f"router-id {router_id}",
-            "area 0",
+            "area 0.0.0.0",  # Use dotted decimal format
             "quit",
             "quit",
             
@@ -1398,8 +2002,8 @@ class DataCenterFabricManager:
             
             # Configure loopback
             "interface LoopBack0",
-            f"ip address {router_id} 32",
-            "ospf enable area 0",
+            f"ip address {router_id} 255.255.255.255",  # Use subnet mask instead of prefix
+            "ospf enable 1 area 0.0.0.0",  # Correct OSPF syntax
             "quit"
         ]
         
@@ -1408,8 +2012,8 @@ class DataCenterFabricManager:
             peer_ip = self._calculate_leaf_ip(spine_ip_range, leaf_id, idx)
             commands.extend([
                 f"interface {interface}",
-                f"ip address {peer_ip} 30",
-                "ospf enable area 0",
+                f"ip address {peer_ip} 255.255.255.252",  # Use subnet mask instead of prefix
+                "ospf enable 1 area 0.0.0.0",  # Correct OSPF syntax
                 "undo shutdown",
                 "quit"
             ])
@@ -1430,9 +2034,13 @@ class DataCenterFabricManager:
                 "quit"
             ])
         
-        return self.device.execute_config_commands(commands)
+        # Use chunked execution for large command sets to prevent timeouts
+        if len(commands) > 15:
+            return self._execute_commands_in_chunks(commands, chunk_size=8)
+        else:
+            return self.device.execute_config_commands(commands)
     
-    def deploy_tenant_network(self, tenant_name: str, vni: int, vlan_id: int, 
+    def deploy_tenant_network(self, tenant_name: str, vni: int, vlan_id: int,
                             gateway_ip: str, subnet_mask: str, 
                             access_interfaces: list = None, 
                             route_target: str = None) -> str:
@@ -1567,21 +2175,56 @@ class DataCenterFabricManager:
     
     def deploy_full_fabric_configuration(self, fabric_config: dict) -> str:
         """Deploy complete datacenter fabric with all tenant networks."""
+        # Check if validation should be skipped
+        skip_validation = fabric_config.get('skip_validation', False)
+        
+        if not skip_validation:
+            # First validate the device connection and basic functionality
+            logger.info("Running device validation (set 'skip_validation': true to bypass)...")
+            if not self._validate_huawei_connection(strict=False):
+                logger.warning("Device validation failed with lenient checks")
+                logger.info("Attempting with minimal validation...")
+                
+                # Try one more basic test
+                try:
+                    result = self.device.execute_command("display version")
+                    if not result or len(result.strip()) < 10:
+                        raise NetworkAutomationError(
+                            "Device validation failed - cannot execute basic commands. "
+                            "Check device connectivity and credentials. "
+                            "You can bypass validation by adding 'skip_validation': true to fabric_config."
+                        )
+                    logger.info("Minimal validation passed, proceeding with configuration...")
+                except Exception as e:
+                    raise NetworkAutomationError(
+                        f"Device validation failed: {e}. "
+                        "You can bypass validation by adding 'skip_validation': true to fabric_config."
+                    )
+            else:
+                logger.info("Device validation passed successfully")
+        else:
+            logger.warning("Device validation SKIPPED - proceeding without validation checks")
+        
         device_role = fabric_config.get('device_role')  # 'spine' or 'leaf'
         device_id = fabric_config.get('device_id', 1)
         as_number = fabric_config.get('as_number', 65000)
         
         if device_role == 'spine':
-            router_id = fabric_config.get('spine_loopback', f"10.255.255.{device_id}")
+            # Use loopback_ip from form, fallback to auto-generated
+            router_id = fabric_config.get('loopback_ip') or f"10.255.255.{device_id}"
             spine_interfaces = fabric_config.get('spine_interfaces', [])
-            return self.configure_spine_underlay(router_id, as_number, spine_interfaces)
+            spine_ip_range = fabric_config.get('underlay_ip_range', '10.0.0.0/30')
+            return self.configure_spine_underlay(router_id, as_number, spine_interfaces, spine_ip_range)
         
-        elif device_role == 'leaf':
-            router_id = fabric_config.get('leaf_loopback', f"10.255.254.{device_id}")
-            spine_interfaces = fabric_config.get('uplink_interfaces', [])
+        elif device_role == 'leaf' or device_role == 'border_leaf':
+            # Use loopback_ip from form, fallback to auto-generated
+            router_id = fabric_config.get('loopback_ip') or f"10.255.254.{device_id}"
+            # Use spine_interfaces from form (these are uplink interfaces on leaf)
+            spine_interfaces = fabric_config.get('spine_interfaces', [])
+            spine_ip_range = fabric_config.get('underlay_ip_range', '10.0.0.0/30')
             
             # Configure underlay
-            result = self.configure_leaf_underlay(router_id, as_number, spine_interfaces, device_id)
+            result = self.configure_leaf_underlay(router_id, as_number, spine_interfaces, device_id, spine_ip_range)
             
             # Configure NVE interface
             nve_config = fabric_config.get('nve_config', {})
@@ -1608,11 +2251,16 @@ class DataCenterFabricManager:
                 result += "\n" + tenant_result
             
             # Configure external connectivity if this is a border leaf
-            if fabric_config.get('is_border_leaf', False):
-                external_config = fabric_config.get('external_config', {})
-                if external_config:
-                    external_result = self.configure_external_connectivity(external_config)
-                    result += "\n" + external_result
+            if device_role == 'border_leaf':
+                # For border leaf, configure basic external connectivity
+                external_config = {
+                    'vrf_name': 'EXTERNAL_VRF',
+                    'as_number': as_number,
+                    'rd': 'auto',
+                    'rt': '65000:999'
+                }
+                external_result = self.configure_external_connectivity(external_config)
+                result += "\n\n--- EXTERNAL CONNECTIVITY ---\n" + external_result
             
             return result
         
@@ -1741,7 +2389,7 @@ def execute_network_task(device_params: Dict, task_type: str, parameters: Dict) 
             
             elif task_type == 'show_routes':
                 manager = RoutingManager(device)
-                result = manager.show_routes()
+                result = manager.show_routes(parameters.get('vrf_name'))
             
             elif task_type == 'backup_config':
                 manager = DeviceInfoManager(device)
@@ -1794,6 +2442,210 @@ def execute_network_task(device_params: Dict, task_type: str, parameters: Dict) 
                     parameters.get('import_rt'),
                     parameters.get('export_rt')
                 )
+            
+            # Advanced BGP tasks
+            elif task_type == 'bgp_route_reflector':
+                manager = BGPManager(device)
+                result = manager.configure_bgp_route_reflector(
+                    parameters['as_number'],
+                    parameters['router_id'],
+                    parameters.get('cluster_id', 1),
+                    parameters.get('clients', [])
+                )
+            
+            elif task_type == 'bgp_confederation':
+                manager = BGPManager(device)
+                result = manager.configure_bgp_confederation(
+                    parameters['as_number'],
+                    parameters['confed_id'],
+                    parameters.get('confed_peers', [])
+                )
+            
+            elif task_type == 'bgp_community':
+                manager = BGPManager(device)
+                result = manager.configure_bgp_community(
+                    parameters['as_number'],
+                    parameters['community_list'],
+                    parameters.get('action', 'permit')
+                )
+            
+            elif task_type == 'bgp_route_map':
+                manager = BGPManager(device)
+                result = manager.configure_bgp_route_map(
+                    parameters['as_number'],
+                    parameters['route_map'],
+                    parameters['neighbor_ip'],
+                    parameters.get('direction', 'in')
+                )
+            
+            elif task_type == 'bgp_multipath':
+                manager = BGPManager(device)
+                result = manager.configure_bgp_multipath(
+                    parameters['as_number'],
+                    parameters.get('ebgp_paths', 4),
+                    parameters.get('ibgp_paths', 4)
+                )
+            
+            # Advanced OSPF tasks
+            elif task_type == 'ospf_area':
+                manager = OSPFManager(device)
+                result = manager.configure_ospf_area(
+                    parameters['process_id'],
+                    parameters['area_id'],
+                    parameters.get('area_type', 'normal'),
+                    parameters.get('vrf_name')
+                )
+            
+            elif task_type == 'ospf_authentication':
+                manager = OSPFManager(device)
+                result = manager.configure_ospf_authentication(
+                    parameters['process_id'],
+                    parameters['area_id'],
+                    parameters['auth_type'],
+                    parameters.get('key'),
+                    parameters.get('vrf_name')
+                )
+            
+            elif task_type == 'ospf_redistribution':
+                manager = OSPFManager(device)
+                result = manager.configure_ospf_redistribution(
+                    parameters['process_id'],
+                    parameters['protocol'],
+                    parameters.get('metric'),
+                    parameters.get('metric_type'),
+                    parameters.get('vrf_name')
+                )
+            
+            # EVPN tasks
+            elif task_type == 'evpn_instance':
+                manager = EVPNManager(device)
+                result = manager.configure_evpn_instance(
+                    parameters['evpn_instance'],
+                    parameters['route_distinguisher'],
+                    parameters['export_rt'],
+                    parameters['import_rt']
+                )
+            
+            elif task_type == 'bgp_evpn':
+                manager = EVPNManager(device)
+                result = manager.configure_bgp_evpn(
+                    parameters['as_number'],
+                    parameters['neighbor_ip'],
+                    parameters.get('source_interface')
+                )
+            
+            elif task_type == 'vbdif_interface':
+                manager = EVPNManager(device)
+                result = manager.configure_vbdif_interface(
+                    parameters['vbdif_id'],
+                    parameters['ip_address'],
+                    parameters['mask'],
+                    parameters['bridge_domain']
+                )
+            
+            elif task_type == 'bridge_domain':
+                manager = EVPNManager(device)
+                result = manager.configure_bridge_domain(
+                    parameters['bd_id'],
+                    parameters.get('evpn_instance')
+                )
+            
+            elif task_type == 'evpn_ethernet_segment':
+                manager = EVPNManager(device)
+                result = manager.configure_evpn_ethernet_segment(
+                    parameters['interface'],
+                    parameters['esi'],
+                    parameters.get('df_election', 'mod')
+                )
+            
+            # VXLAN tasks
+            elif task_type == 'vxlan_tunnel':
+                manager = VXLANManager(device)
+                result = manager.configure_vxlan_tunnel(
+                    parameters['tunnel_id'],
+                    parameters['source_ip'],
+                    parameters['destination_ip'],
+                    parameters['vni']
+                )
+            
+            elif task_type == 'nve_interface':
+                manager = VXLANManager(device)
+                result = manager.configure_nve_interface(
+                    parameters['nve_id'],
+                    parameters['source_ip'],
+                    parameters.get('vni_mapping', {})
+                )
+            
+            elif task_type == 'vxlan_bd_binding':
+                manager = VXLANManager(device)
+                result = manager.configure_vxlan_bd_binding(
+                    parameters['bd_id'],
+                    parameters['vni'],
+                    parameters['nve_interface']
+                )
+            
+            elif task_type == 'vxlan_access_port':
+                manager = VXLANManager(device)
+                result = manager.configure_vxlan_access_port(
+                    parameters['interface'],
+                    parameters['bd_id']
+                )
+            
+            elif task_type == 'vxlan_gateway':
+                manager = VXLANManager(device)
+                result = manager.configure_vxlan_gateway(
+                    parameters['bd_id'],
+                    parameters['gateway_ip'],
+                    parameters['mask'],
+                    parameters.get('vbdif_id')
+                )
+            
+            # Datacenter Fabric tasks
+            elif task_type == 'datacenter_fabric':
+                manager = DataCenterFabricManager(device)
+                # Pass parameters directly as fabric_config
+                fabric_config = parameters
+                result = manager.deploy_full_fabric_configuration(fabric_config)
+            
+            elif task_type == 'spine_underlay':
+                manager = DataCenterFabricManager(device)
+                result = manager.configure_spine_underlay(
+                    parameters['router_id'],
+                    parameters['as_number'],
+                    parameters['spine_interfaces'],
+                    parameters.get('spine_ip_range', '10.0.0.0/30')
+                )
+            
+            elif task_type == 'leaf_underlay':
+                manager = DataCenterFabricManager(device)
+                result = manager.configure_leaf_underlay(
+                    parameters['router_id'],
+                    parameters['as_number'],
+                    parameters['spine_interfaces'],
+                    parameters['leaf_id']
+                )
+            
+            elif task_type == 'tenant_network':
+                manager = DataCenterFabricManager(device)
+                result = manager.deploy_tenant_network(
+                    parameters['tenant_name'],
+                    parameters['vni'],
+                    parameters['vlan_id'],
+                    parameters['gateway_ip'],
+                    parameters['subnet_mask'],
+                    parameters.get('access_interfaces', []),
+                    parameters.get('route_target')
+                )
+            
+            elif task_type == 'external_connectivity':
+                manager = DataCenterFabricManager(device)
+                result = manager.configure_external_connectivity(
+                    parameters['border_leaf_config']
+                )
+            
+            elif task_type == 'device_diagnostics':
+                manager = DataCenterFabricManager(device)
+                result = manager.diagnose_device_connectivity()
             
             else:
                 raise NetworkAutomationError(f"Unknown task type: {task_type}")

@@ -198,6 +198,30 @@ class DeviceTestForm(forms.Form):
     )
 
 
+class DeviceSelectionForm(forms.Form):
+    """Simple form for device selection (used by show commands)"""
+    device = forms.ModelChoiceField(
+        queryset=Device.objects.filter(is_active=True),
+        empty_label="Select a device",
+        label="Target Device"
+    )
+
+
+class ShowRoutesForm(forms.Form):
+    """Form for showing routing table with optional VRF support"""
+    device = forms.ModelChoiceField(
+        queryset=Device.objects.filter(is_active=True),
+        empty_label="Select a device",
+        label="Target Device"
+    )
+    vrf_name = forms.CharField(
+        max_length=100,
+        required=False,
+        widget=forms.TextInput(attrs={'class': 'form-control', 'placeholder': 'Leave empty for global routing table'}),
+        help_text='Optional: Enter VRF name to show VRF-specific routing table'
+    )
+
+
 class VRFCreateForm(forms.Form):
     vrf_name = forms.CharField(
         max_length=100,

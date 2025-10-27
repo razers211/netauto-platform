@@ -16,14 +16,35 @@
                     
                     <div class="mb-4">
                         <h5><i class="bi bi-hdd-network"></i> Device Selection</h5>
-                        <div class="mb-3">
-                            <label for="{{ device_form.device.id_for_label }}" class="form-label">{{ device_form.device.label }}</label>
-                            {{ device_form.device }}
-                            {% if device_form.device.errors %}
-                                <div class="text-danger small">{{ device_form.device.errors.0 }}</div>
-                            {% endif %}
-                            <div class="form-text">Select the device to query</div>
-                        </div>
+                        {% if supports_vrf %}
+                            <!-- Show routes form with VRF support -->
+                            <div class="mb-3">
+                                <label for="{{ form.device.id_for_label }}" class="form-label">{{ form.device.label }}</label>
+                                {{ form.device }}
+                                {% if form.device.errors %}
+                                    <div class="text-danger small">{{ form.device.errors.0 }}</div>
+                                {% endif %}
+                                <div class="form-text">Select the device to query</div>
+                            </div>
+                            <div class="mb-3">
+                                <label for="{{ form.vrf_name.id_for_label }}" class="form-label">{{ form.vrf_name.label }}</label>
+                                {{ form.vrf_name }}
+                                {% if form.vrf_name.errors %}
+                                    <div class="text-danger small">{{ form.vrf_name.errors.0 }}</div>
+                                {% endif %}
+                                <div class="form-text">{{ form.vrf_name.help_text }}</div>
+                            </div>
+                        {% else %}
+                            <!-- Regular device selection form -->
+                            <div class="mb-3">
+                                <label for="{{ device_form.device.id_for_label }}" class="form-label">{{ device_form.device.label }}</label>
+                                {{ device_form.device }}
+                                {% if device_form.device.errors %}
+                                    <div class="text-danger small">{{ device_form.device.errors.0 }}</div>
+                                {% endif %}
+                                <div class="form-text">Select the device to query</div>
+                            </div>
+                        {% endif %}
                     </div>
 
                     <div class="alert alert-info" role="alert">
@@ -36,7 +57,8 @@
                         {% elif command_type == 'vlan' %}
                             This will execute "show vlan brief" (Cisco) or "display vlan" (Huawei) to show VLAN configuration.
                         {% elif command_type == 'routes' %}
-                            This will execute "show ip route" (Cisco) or "display ip routing-table" (Huawei) to show routing table.
+                            This will execute "show ip route" (Cisco) or "display ip routing-table" (Huawei) to show routing table. 
+                            {% if supports_vrf %}<strong>VRF support:</strong> You can optionally specify a VRF to show VRF-specific routing table.{% endif %}
                         {% elif command_type == 'config' %}
                             This will execute "show running-config" (Cisco) or "display current-configuration" (Huawei) to backup the configuration.
                         {% endif %}
@@ -73,8 +95,8 @@
                             <div class="output-display small">show vlan brief</div>
                             <p class="small text-muted mt-2">Shows VLAN IDs, names, status, and assigned ports.</p>
                         {% elif command_type == 'routes' %}
-                            <div class="output-display small">show ip route</div>
-                            <p class="small text-muted mt-2">Shows routing table with networks, next hops, and metrics.</p>
+                            <div class="output-display small">show ip route{% if supports_vrf %}<br>show ip route vrf &lt;vrf-name&gt;{% endif %}</div>
+                            <p class="small text-muted mt-2">Shows routing table with networks, next hops, and metrics.{% if supports_vrf %} VRF-specific tables supported.{% endif %}</p>
                         {% elif command_type == 'config' %}
                             <div class="output-display small">show running-config</div>
                             <p class="small text-muted mt-2">Shows current running configuration of the device.</p>
@@ -92,8 +114,8 @@
                             <div class="output-display small">display vlan</div>
                             <p class="small text-muted mt-2">Shows VLAN IDs, names, status, and port assignments.</p>
                         {% elif command_type == 'routes' %}
-                            <div class="output-display small">display ip routing-table</div>
-                            <p class="small text-muted mt-2">Shows routing table with destinations, next hops, and preferences.</p>
+                            <div class="output-display small">display ip routing-table{% if supports_vrf %}<br>display ip routing-table vpn-instance &lt;vrf-name&gt;{% endif %}</div>
+                            <p class="small text-muted mt-2">Shows routing table with destinations, next hops, and preferences.{% if supports_vrf %} VRF-specific tables supported.{% endif %}</p>
                         {% elif command_type == 'config' %}
                             <div class="output-display small">display current-configuration</div>
                             <p class="small text-muted mt-2">Shows current running configuration of the device.</p>

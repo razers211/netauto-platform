@@ -11,12 +11,13 @@ import threading
 from .models import Device, NetworkTask, TaskResult
 from .forms import (
     DeviceForm, VLANCreateForm, VLANDeleteForm, InterfaceConfigForm,
-    StaticRouteForm, OSPFConfigForm, TaskExecutionForm, DeviceTestForm,
+    StaticRouteForm, OSPFConfigForm, DeviceTestForm,
     VRFCreateForm, VRFAssignInterfaceForm, BGPNeighborForm, BGPNetworkForm, BGPVRFConfigForm,
     VLANInterfaceConfigForm, BGPRouteReflectorForm, BGPConfederationForm, BGPMultipathForm,
     OSPFAreaForm, OSPFAuthenticationForm, EVPNInstanceForm, BGPEVPNForm, VXLANTunnelForm,
     NVEInterfaceForm, VXLANGatewayForm, VXLANAccessPortForm, DataCenterFabricForm,
-    TenantNetworkForm, ExternalConnectivityForm, MultiTenantDeploymentForm
+    TenantNetworkForm, ExternalConnectivityForm, MultiTenantDeploymentForm,
+    DeviceSelectionForm, ShowRoutesForm
 )
 from .network_automation import execute_network_task
 
@@ -204,6 +205,10 @@ def task_detail(request, task_id):
 
 def execute_task_async(task):
     """Execute network task asynchronously"""
+    import logging
+    logger = logging.getLogger(__name__)
+    
+    logger.info(f"Starting async execution for task {task.id}: {task.task_type}")
     task.status = 'running'
     task.started_at = timezone.now()
     task.save()
@@ -252,7 +257,7 @@ def vlan_create(request):
     """Create VLAN on selected devices"""
     if request.method == 'POST':
         form = VLANCreateForm(request.POST)
-        device_form = TaskExecutionForm(request.POST)
+        device_form = DeviceSelectionForm(request.POST)
         
         if form.is_valid() and device_form.is_valid():
             device = device_form.cleaned_data['device']
@@ -276,7 +281,7 @@ def vlan_create(request):
             return redirect('task_detail', task_id=task.id)
     else:
         form = VLANCreateForm()
-        device_form = TaskExecutionForm()
+        device_form = DeviceSelectionForm()
     
     context = {
         'form': form,
@@ -292,7 +297,7 @@ def vlan_delete(request):
     """Delete VLAN from selected devices"""
     if request.method == 'POST':
         form = VLANDeleteForm(request.POST)
-        device_form = TaskExecutionForm(request.POST)
+        device_form = DeviceSelectionForm(request.POST)
         
         if form.is_valid() and device_form.is_valid():
             device = device_form.cleaned_data['device']
@@ -313,7 +318,7 @@ def vlan_delete(request):
             return redirect('task_detail', task_id=task.id)
     else:
         form = VLANDeleteForm()
-        device_form = TaskExecutionForm()
+        device_form = DeviceSelectionForm()
     
     context = {
         'form': form,
@@ -329,7 +334,7 @@ def interface_config(request):
     """Configure interface on selected device"""
     if request.method == 'POST':
         form = InterfaceConfigForm(request.POST)
-        device_form = TaskExecutionForm(request.POST)
+        device_form = DeviceSelectionForm(request.POST)
         
         if form.is_valid() and device_form.is_valid():
             device = device_form.cleaned_data['device']
@@ -364,7 +369,7 @@ def interface_config(request):
             return redirect('task_detail', task_id=task.id)
     else:
         form = InterfaceConfigForm()
-        device_form = TaskExecutionForm()
+        device_form = DeviceSelectionForm()
     
     context = {
         'form': form,
@@ -379,7 +384,7 @@ def routing_static(request):
     """Configure static routing on selected device"""
     if request.method == 'POST':
         form = StaticRouteForm(request.POST)
-        device_form = TaskExecutionForm(request.POST)
+        device_form = DeviceSelectionForm(request.POST)
         
         if form.is_valid() and device_form.is_valid():
             device = device_form.cleaned_data['device']
@@ -406,7 +411,7 @@ def routing_static(request):
             return redirect('task_detail', task_id=task.id)
     else:
         form = StaticRouteForm()
-        device_form = TaskExecutionForm()
+        device_form = DeviceSelectionForm()
     
     context = {
         'form': form,
@@ -421,7 +426,7 @@ def routing_ospf(request):
     """Configure OSPF routing on selected device"""
     if request.method == 'POST':
         form = OSPFConfigForm(request.POST)
-        device_form = TaskExecutionForm(request.POST)
+        device_form = DeviceSelectionForm(request.POST)
         
         if form.is_valid() and device_form.is_valid():
             device = device_form.cleaned_data['device']
@@ -447,7 +452,7 @@ def routing_ospf(request):
             return redirect('task_detail', task_id=task.id)
     else:
         form = OSPFConfigForm()
-        device_form = TaskExecutionForm()
+        device_form = DeviceSelectionForm()
     
     context = {
         'form': form,
@@ -460,6 +465,9 @@ def routing_ospf(request):
 @login_required
 def show_command(request, command_type):
     """Execute show commands on selected device"""
+    import logging
+    logger = logging.getLogger(__name__)
+    
     command_map = {
         'version': 'show_version',
         'interfaces': 'show_interfaces',
@@ -473,33 +481,89 @@ def show_command(request, command_type):
         return redirect('index')
     
     if request.method == 'POST':
-        device_form = TaskExecutionForm(request.POST)
+        logger.info(f"Show command POST request: {command_type}, User: {request.user}")
         
-        if device_form.is_valid():
-            device = device_form.cleaned_data['device']
+        # Use special form for routes command to support VRF
+        if command_type == 'routes':
+            from .forms import ShowRoutesForm
+            form = ShowRoutesForm(request.POST)
+            if form.is_valid():
+                device = form.cleaned_data['device']
+                vrf_name = form.cleaned_data.get('vrf_name')
+                logger.info(f"Device selected: {device.name} ({device.device_type}), VRF: {vrf_name or 'global'}")
+                
+                # Create network task with VRF parameter
+                parameters = {}
+                if vrf_name:
+                    parameters['vrf_name'] = vrf_name
+                
+                task = NetworkTask.objects.create(
+                    device=device,
+                    task_type=command_map[command_type],
+                    parameters=parameters,
+                    created_by=request.user
+                )
+                logger.info(f"Task created: ID {task.id}, Type: {task.task_type}, Parameters: {parameters}")
+                
+                # Execute task asynchronously
+                thread = threading.Thread(target=execute_task_async, args=(task,))
+                thread.start()
+                logger.info(f"Background thread started for task {task.id}")
+                
+                messages.success(request, f'Routes command submitted for {device.name}{f" (VRF: {vrf_name})" if vrf_name else ""}')
+                return redirect('task_detail', task_id=task.id)
+            else:
+                logger.error(f"Routes form validation failed: {form.errors}")
+                messages.error(request, 'Please correct the form errors')
+        else:
+            # Use regular device selection form for other commands
+            device_form = DeviceSelectionForm(request.POST)
             
-            # Create network task
-            task = NetworkTask.objects.create(
-                device=device,
-                task_type=command_map[command_type],
-                parameters={},
-                created_by=request.user
-            )
-            
-            # Execute task asynchronously
-            thread = threading.Thread(target=execute_task_async, args=(task,))
-            thread.start()
-            
-            messages.success(request, f'{command_type.title()} command submitted for {device.name}')
-            return redirect('task_detail', task_id=task.id)
+            if device_form.is_valid():
+                device = device_form.cleaned_data['device']
+                logger.info(f"Device selected: {device.name} ({device.device_type})")
+                
+                # Create network task
+                task = NetworkTask.objects.create(
+                    device=device,
+                    task_type=command_map[command_type],
+                    parameters={},
+                    created_by=request.user
+                )
+                logger.info(f"Task created: ID {task.id}, Type: {task.task_type}")
+                
+                # Execute task asynchronously
+                thread = threading.Thread(target=execute_task_async, args=(task,))
+                thread.start()
+                logger.info(f"Background thread started for task {task.id}")
+                
+                messages.success(request, f'{command_type.title()} command submitted for {device.name}')
+                return redirect('task_detail', task_id=task.id)
+            else:
+                logger.error(f"Device form validation failed: {device_form.errors}")
+                messages.error(request, 'Please select a device')
     else:
-        device_form = TaskExecutionForm()
+        # Initialize forms based on command type
+        if command_type == 'routes':
+            from .forms import ShowRoutesForm
+            form = ShowRoutesForm()
+        else:
+            device_form = DeviceSelectionForm()
     
-    context = {
-        'device_form': device_form,
-        'title': f'Show {command_type.title()}',
-        'command_type': command_type
-    }
+    if command_type == 'routes':
+        context = {
+            'form': form,
+            'title': f'Show {command_type.title()}',
+            'command_type': command_type,
+            'supports_vrf': True
+        }
+    else:
+        context = {
+            'device_form': device_form,
+            'title': f'Show {command_type.title()}',
+            'command_type': command_type,
+            'supports_vrf': False
+        }
     return render(request, 'automation/show_command_form.html', context)
 
 
@@ -667,7 +731,7 @@ def vrf_create(request):
     """Create VRF on selected device"""
     if request.method == 'POST':
         form = VRFCreateForm(request.POST)
-        device_form = TaskExecutionForm(request.POST)
+        device_form = DeviceSelectionForm(request.POST)
         
         if form.is_valid() and device_form.is_valid():
             device = device_form.cleaned_data['device']
@@ -694,7 +758,7 @@ def vrf_create(request):
             return redirect('task_detail', task_id=task.id)
     else:
         form = VRFCreateForm()
-        device_form = TaskExecutionForm()
+        device_form = DeviceSelectionForm()
     
     context = {
         'form': form,
@@ -710,7 +774,7 @@ def vrf_assign_interface(request):
     """Assign VRF to interface on selected device"""
     if request.method == 'POST':
         form = VRFAssignInterfaceForm(request.POST)
-        device_form = TaskExecutionForm(request.POST)
+        device_form = DeviceSelectionForm(request.POST)
         
         if form.is_valid() and device_form.is_valid():
             device = device_form.cleaned_data['device']
@@ -736,7 +800,7 @@ def vrf_assign_interface(request):
             return redirect('task_detail', task_id=task.id)
     else:
         form = VRFAssignInterfaceForm()
-        device_form = TaskExecutionForm()
+        device_form = DeviceSelectionForm()
     
     context = {
         'form': form,
@@ -751,7 +815,7 @@ def bgp_neighbor(request):
     """Configure BGP neighbor on selected device"""
     if request.method == 'POST':
         form = BGPNeighborForm(request.POST)
-        device_form = TaskExecutionForm(request.POST)
+        device_form = DeviceSelectionForm(request.POST)
         
         if form.is_valid() and device_form.is_valid():
             device = device_form.cleaned_data['device']
@@ -778,7 +842,7 @@ def bgp_neighbor(request):
             return redirect('task_detail', task_id=task.id)
     else:
         form = BGPNeighborForm()
-        device_form = TaskExecutionForm()
+        device_form = DeviceSelectionForm()
     
     context = {
         'form': form,
@@ -793,7 +857,7 @@ def bgp_network(request):
     """Advertise network in BGP on selected device"""
     if request.method == 'POST':
         form = BGPNetworkForm(request.POST)
-        device_form = TaskExecutionForm(request.POST)
+        device_form = DeviceSelectionForm(request.POST)
         
         if form.is_valid() and device_form.is_valid():
             device = device_form.cleaned_data['device']
@@ -819,7 +883,7 @@ def bgp_network(request):
             return redirect('task_detail', task_id=task.id)
     else:
         form = BGPNetworkForm()
-        device_form = TaskExecutionForm()
+        device_form = DeviceSelectionForm()
     
     context = {
         'form': form,
@@ -834,7 +898,7 @@ def bgp_vrf_config(request):
     """Configure BGP for VRF on selected device"""
     if request.method == 'POST':
         form = BGPVRFConfigForm(request.POST)
-        device_form = TaskExecutionForm(request.POST)
+        device_form = DeviceSelectionForm(request.POST)
         
         if form.is_valid() and device_form.is_valid():
             device = device_form.cleaned_data['device']
@@ -861,7 +925,7 @@ def bgp_vrf_config(request):
             return redirect('task_detail', task_id=task.id)
     else:
         form = BGPVRFConfigForm()
-        device_form = TaskExecutionForm()
+        device_form = DeviceSelectionForm()
     
     context = {
         'form': form,
@@ -876,7 +940,7 @@ def vlan_interface_config(request):
     """Configure VLAN interface (SVI) on selected device"""
     if request.method == 'POST':
         form = VLANInterfaceConfigForm(request.POST)
-        device_form = TaskExecutionForm(request.POST)
+        device_form = DeviceSelectionForm(request.POST)
         
         if form.is_valid() and device_form.is_valid():
             device = device_form.cleaned_data['device']
@@ -904,7 +968,7 @@ def vlan_interface_config(request):
             return redirect('task_detail', task_id=task.id)
     else:
         form = VLANInterfaceConfigForm()
-        device_form = TaskExecutionForm()
+        device_form = DeviceSelectionForm()
     
     context = {
         'form': form,
@@ -919,7 +983,7 @@ def bgp_route_reflector(request):
     """Configure BGP Route Reflector on selected device"""
     if request.method == 'POST':
         form = BGPRouteReflectorForm(request.POST)
-        device_form = TaskExecutionForm(request.POST)
+        device_form = DeviceSelectionForm(request.POST)
         
         if form.is_valid() and device_form.is_valid():
             device = device_form.cleaned_data['device']
@@ -949,7 +1013,7 @@ def bgp_route_reflector(request):
             return redirect('task_detail', task_id=task.id)
     else:
         form = BGPRouteReflectorForm()
-        device_form = TaskExecutionForm()
+        device_form = DeviceSelectionForm()
     
     context = {
         'form': form,
@@ -964,7 +1028,7 @@ def bgp_confederation(request):
     """Configure BGP Confederation on selected device"""
     if request.method == 'POST':
         form = BGPConfederationForm(request.POST)
-        device_form = TaskExecutionForm(request.POST)
+        device_form = DeviceSelectionForm(request.POST)
         
         if form.is_valid() and device_form.is_valid():
             device = device_form.cleaned_data['device']
@@ -993,7 +1057,7 @@ def bgp_confederation(request):
             return redirect('task_detail', task_id=task.id)
     else:
         form = BGPConfederationForm()
-        device_form = TaskExecutionForm()
+        device_form = DeviceSelectionForm()
     
     context = {
         'form': form,
@@ -1008,7 +1072,7 @@ def bgp_multipath(request):
     """Configure BGP Multipath on selected device"""
     if request.method == 'POST':
         form = BGPMultipathForm(request.POST)
-        device_form = TaskExecutionForm(request.POST)
+        device_form = DeviceSelectionForm(request.POST)
         
         if form.is_valid() and device_form.is_valid():
             device = device_form.cleaned_data['device']
@@ -1033,7 +1097,7 @@ def bgp_multipath(request):
             return redirect('task_detail', task_id=task.id)
     else:
         form = BGPMultipathForm()
-        device_form = TaskExecutionForm()
+        device_form = DeviceSelectionForm()
     
     context = {
         'form': form,
@@ -1048,7 +1112,7 @@ def ospf_area(request):
     """Configure OSPF Area on selected device"""
     if request.method == 'POST':
         form = OSPFAreaForm(request.POST)
-        device_form = TaskExecutionForm(request.POST)
+        device_form = DeviceSelectionForm(request.POST)
         
         if form.is_valid() and device_form.is_valid():
             device = device_form.cleaned_data['device']
@@ -1075,7 +1139,7 @@ def ospf_area(request):
             return redirect('task_detail', task_id=task.id)
     else:
         form = OSPFAreaForm()
-        device_form = TaskExecutionForm()
+        device_form = DeviceSelectionForm()
     
     context = {
         'form': form,
@@ -1090,7 +1154,7 @@ def ospf_authentication(request):
     """Configure OSPF Authentication on selected device"""
     if request.method == 'POST':
         form = OSPFAuthenticationForm(request.POST)
-        device_form = TaskExecutionForm(request.POST)
+        device_form = DeviceSelectionForm(request.POST)
         
         if form.is_valid() and device_form.is_valid():
             device = device_form.cleaned_data['device']
@@ -1118,7 +1182,7 @@ def ospf_authentication(request):
             return redirect('task_detail', task_id=task.id)
     else:
         form = OSPFAuthenticationForm()
-        device_form = TaskExecutionForm()
+        device_form = DeviceSelectionForm()
     
     context = {
         'form': form,
@@ -1133,7 +1197,7 @@ def evpn_instance(request):
     """Configure EVPN Instance on selected device"""
     if request.method == 'POST':
         form = EVPNInstanceForm(request.POST)
-        device_form = TaskExecutionForm(request.POST)
+        device_form = DeviceSelectionForm(request.POST)
         
         if form.is_valid() and device_form.is_valid():
             device = device_form.cleaned_data['device']
@@ -1159,7 +1223,7 @@ def evpn_instance(request):
             return redirect('task_detail', task_id=task.id)
     else:
         form = EVPNInstanceForm()
-        device_form = TaskExecutionForm()
+        device_form = DeviceSelectionForm()
     
     context = {
         'form': form,
@@ -1174,7 +1238,7 @@ def bgp_evpn(request):
     """Configure BGP EVPN on selected device"""
     if request.method == 'POST':
         form = BGPEVPNForm(request.POST)
-        device_form = TaskExecutionForm(request.POST)
+        device_form = DeviceSelectionForm(request.POST)
         
         if form.is_valid() and device_form.is_valid():
             device = device_form.cleaned_data['device']
@@ -1199,7 +1263,7 @@ def bgp_evpn(request):
             return redirect('task_detail', task_id=task.id)
     else:
         form = BGPEVPNForm()
-        device_form = TaskExecutionForm()
+        device_form = DeviceSelectionForm()
     
     context = {
         'form': form,
@@ -1214,7 +1278,7 @@ def vxlan_tunnel(request):
     """Configure VXLAN Tunnel on selected device"""
     if request.method == 'POST':
         form = VXLANTunnelForm(request.POST)
-        device_form = TaskExecutionForm(request.POST)
+        device_form = DeviceSelectionForm(request.POST)
         
         if form.is_valid() and device_form.is_valid():
             device = device_form.cleaned_data['device']
@@ -1240,7 +1304,7 @@ def vxlan_tunnel(request):
             return redirect('task_detail', task_id=task.id)
     else:
         form = VXLANTunnelForm()
-        device_form = TaskExecutionForm()
+        device_form = DeviceSelectionForm()
     
     context = {
         'form': form,
@@ -1255,7 +1319,7 @@ def nve_interface(request):
     """Configure NVE Interface on selected device"""
     if request.method == 'POST':
         form = NVEInterfaceForm(request.POST)
-        device_form = TaskExecutionForm(request.POST)
+        device_form = DeviceSelectionForm(request.POST)
         
         if form.is_valid() and device_form.is_valid():
             device = device_form.cleaned_data['device']
@@ -1288,7 +1352,7 @@ def nve_interface(request):
             return redirect('task_detail', task_id=task.id)
     else:
         form = NVEInterfaceForm()
-        device_form = TaskExecutionForm()
+        device_form = DeviceSelectionForm()
     
     context = {
         'form': form,
@@ -1303,7 +1367,7 @@ def vxlan_gateway(request):
     """Configure VXLAN Gateway on selected device"""
     if request.method == 'POST':
         form = VXLANGatewayForm(request.POST)
-        device_form = TaskExecutionForm(request.POST)
+        device_form = DeviceSelectionForm(request.POST)
         
         if form.is_valid() and device_form.is_valid():
             device = device_form.cleaned_data['device']
@@ -1329,7 +1393,7 @@ def vxlan_gateway(request):
             return redirect('task_detail', task_id=task.id)
     else:
         form = VXLANGatewayForm()
-        device_form = TaskExecutionForm()
+        device_form = DeviceSelectionForm()
     
     context = {
         'form': form,
@@ -1344,7 +1408,7 @@ def vxlan_access_port(request):
     """Configure VXLAN Access Port on selected device"""
     if request.method == 'POST':
         form = VXLANAccessPortForm(request.POST)
-        device_form = TaskExecutionForm(request.POST)
+        device_form = DeviceSelectionForm(request.POST)
         
         if form.is_valid() and device_form.is_valid():
             device = device_form.cleaned_data['device']
@@ -1368,7 +1432,7 @@ def vxlan_access_port(request):
             return redirect('task_detail', task_id=task.id)
     else:
         form = VXLANAccessPortForm()
-        device_form = TaskExecutionForm()
+        device_form = DeviceSelectionForm()
     
     context = {
         'form': form,
@@ -1383,7 +1447,7 @@ def datacenter_fabric(request):
     """Deploy Datacenter Fabric on selected device"""
     if request.method == 'POST':
         form = DataCenterFabricForm(request.POST)
-        device_form = TaskExecutionForm(request.POST)
+        device_form = DeviceSelectionForm(request.POST)
         
         if form.is_valid() and device_form.is_valid():
             device = device_form.cleaned_data['device']
@@ -1415,7 +1479,7 @@ def datacenter_fabric(request):
             return redirect('task_detail', task_id=task.id)
     else:
         form = DataCenterFabricForm()
-        device_form = TaskExecutionForm()
+        device_form = DeviceSelectionForm()
     
     context = {
         'form': form,
@@ -1430,7 +1494,7 @@ def tenant_network(request):
     """Deploy Tenant Network on selected device"""
     if request.method == 'POST':
         form = TenantNetworkForm(request.POST)
-        device_form = TaskExecutionForm(request.POST)
+        device_form = DeviceSelectionForm(request.POST)
         
         if form.is_valid() and device_form.is_valid():
             device = device_form.cleaned_data['device']
@@ -1464,7 +1528,7 @@ def tenant_network(request):
             return redirect('task_detail', task_id=task.id)
     else:
         form = TenantNetworkForm()
-        device_form = TaskExecutionForm()
+        device_form = DeviceSelectionForm()
     
     context = {
         'form': form,
@@ -1479,7 +1543,7 @@ def external_connectivity(request):
     """Configure External Connectivity on selected device"""
     if request.method == 'POST':
         form = ExternalConnectivityForm(request.POST)
-        device_form = TaskExecutionForm(request.POST)
+        device_form = DeviceSelectionForm(request.POST)
         
         if form.is_valid() and device_form.is_valid():
             device = device_form.cleaned_data['device']
@@ -1509,7 +1573,7 @@ def external_connectivity(request):
             return redirect('task_detail', task_id=task.id)
     else:
         form = ExternalConnectivityForm()
-        device_form = TaskExecutionForm()
+        device_form = DeviceSelectionForm()
     
     context = {
         'form': form,
