@@ -237,7 +237,7 @@ class NetworkDeviceManager:
                 if self._check_connection_health():
                     logger.info(f"Successfully reconnected to {self.device_params['host']} on attempt {attempt + 1}")
                     # Re-setup the session
-                    self.test_device_prompt()
+                    self._fast_session_setup()
                     return True
                 else:
                     logger.warning(f"Reconnection attempt {attempt + 1} succeeded but health check failed")
@@ -383,7 +383,7 @@ class NetworkDeviceManager:
             raise NetworkAutomationError(f"Huawei configuration failed: {e}")
     
     def _fast_enter_huawei_config(self):
-        """Fast entry to Huawei system-view configuration mode"""
+        """Fast entry to Huawei system-view configuration mode with interactive prompt handling"""
         try:
             # Check current prompt to see if already in system-view
             current_prompt = self.connection.find_prompt()
@@ -394,21 +394,27 @@ class NetworkDeviceManager:
                 logger.debug("Already in Huawei system-view")
                 return
             
-            # Enter system-view mode
+            # Enter system-view mode (handle potential interactive [Y/N] prompts)
             logger.debug("Entering Huawei system-view...")
-            result = self.connection.send_command(
-                "system-view", 
-                delay_factor=1.0,  # Increased from 0.3 for reliability
-                max_loops=150       # Give more time for prompt detection
+            result = self.connection.send_command_timing(
+                "system-view",
+                strip_prompt=False,
+                strip_command=False
             )
+            
+            # Handle confirmation prompts generically
+            lower_res = (result or "").lower()
+            if any(k in lower_res for k in ["[y/n]", " y/n ", "please choose 'yes' or 'no'", "confirm", "are you sure"]):
+                logger.debug("Detected confirmation prompt on system-view entry; sending 'Y'")
+                result += self.connection.send_command_timing("Y", strip_prompt=False, strip_command=False)
             
             # Verify entry was successful
             new_prompt = self.connection.find_prompt()
             logger.debug(f"After system-view prompt: '{new_prompt}'")
             
             # Check for errors in command output
-            if "Error" in result or "Unrecognized" in result or "Invalid" in result:
-                raise NetworkAutomationError(f"System-view command failed: {result[:100]}")
+            if any(err in (result or "") for err in ["Error", "Unrecognized", "Invalid"]):
+                raise NetworkAutomationError(f"System-view command failed: {result[:200]}")
                 
             # Verify we're in config mode (prompt should end with ] for Huawei)
             if not new_prompt.strip().endswith(']'):
@@ -420,7 +426,7 @@ class NetworkDeviceManager:
             raise NetworkAutomationError(f"Cannot enter Huawei config mode: {e}")
     
     def _fast_exit_huawei_config(self):
-        """Fast exit from Huawei system-view configuration mode"""
+        """Fast exit from Huawei system-view configuration mode with interactive prompt handling"""
         try:
             # Check current prompt
             current_prompt = self.connection.find_prompt()
@@ -431,21 +437,27 @@ class NetworkDeviceManager:
                 logger.debug("Not in Huawei system-view, no need to exit")
                 return
             
-            # Exit system-view with quit command
+            # Exit system-view with quit command (handle possible confirmation prompts)
             logger.debug("Exiting Huawei system-view...")
-            result = self.connection.send_command(
-                "quit", 
-                delay_factor=1.0,  # Increased from 0.2 for reliability
-                max_loops=100       # Give more time for prompt detection
+            result = self.connection.send_command_timing(
+                "quit",
+                strip_prompt=False,
+                strip_command=False
             )
+            
+            lower_res = (result or "").lower()
+            if any(k in lower_res for k in ["[y/n]", " y/n ", "please choose 'yes' or 'no'", "confirm", "are you sure"]):
+                # Prefer to confirm exit so we don't get stuck
+                logger.debug("Detected confirmation prompt on exit; sending 'Y'")
+                result += self.connection.send_command_timing("Y", strip_prompt=False, strip_command=False)
             
             # Verify exit
             new_prompt = self.connection.find_prompt()
             logger.debug(f"After quit prompt: '{new_prompt}'")
             
-            # Should now be back to user view (prompt ends with >)
-            if new_prompt.strip().endswith('>'):
-                logger.debug("Successfully exited to user view")
+            # Prefer '>' but accept other non-config prompts as success
+            if new_prompt.strip().endswith(('>', '#')):
+                logger.debug("Successfully exited to operational view")
             else:
                 logger.warning(f"Exit may not have worked. Prompt: '{new_prompt}'")
                 
@@ -2774,8 +2786,8 @@ def execute_network_task(device_params: Dict, task_type: str, parameters: Dict) 
                 manager = BGPManager(device)
                 result = manager.configure_bgp_confederation(
                     parameters['as_number'],
-                    parameters['confed_id'],
-                    parameters.get('confed_peers', [])
+                    parameters['confederation_id'],
+                    parameters.get('confederation_peers', [])
                 )
             
             elif task_type == 'bgp_community':
@@ -2809,18 +2821,20 @@ def execute_network_task(device_params: Dict, task_type: str, parameters: Dict) 
                 result = manager.configure_ospf_area(
                     parameters['process_id'],
                     parameters['area_id'],
-                    parameters.get('area_type', 'normal'),
-                    parameters.get('vrf_name')
+                    parameters.get('area_type', 'standard'),
+                    parameters.get('stub_default_cost'),
+                    parameters.get('nssa_default_route', False)
                 )
             
             elif task_type == 'ospf_authentication':
                 manager = OSPFManager(device)
                 result = manager.configure_ospf_authentication(
                     parameters['process_id'],
-                    parameters['area_id'],
-                    parameters['auth_type'],
-                    parameters.get('key'),
-                    parameters.get('vrf_name')
+                    parameters.get('area_id'),
+                    parameters.get('interface'),
+                    parameters.get('auth_type', 'md5'),
+                    parameters.get('key_id', 1),
+                    parameters.get('password', 'cisco123')
                 )
             
             elif task_type == 'ospf_redistribution':
@@ -2887,10 +2901,18 @@ def execute_network_task(device_params: Dict, task_type: str, parameters: Dict) 
             
             elif task_type == 'nve_interface':
                 manager = VXLANManager(device)
+                vni_mapping = parameters.get('vni_mapping') or parameters.get('vni_mappings')
+                if isinstance(vni_mapping, list):
+                    try:
+                        vni_mapping = {item['vni']: item['bridge_domain'] for item in vni_mapping}
+                    except Exception:
+                        vni_mapping = {}
+                elif not isinstance(vni_mapping, dict):
+                    vni_mapping = {}
                 result = manager.configure_nve_interface(
                     parameters['nve_id'],
                     parameters['source_ip'],
-                    parameters.get('vni_mapping', {})
+                    vni_mapping
                 )
             
             elif task_type == 'vxlan_bd_binding':
@@ -2903,17 +2925,20 @@ def execute_network_task(device_params: Dict, task_type: str, parameters: Dict) 
             
             elif task_type == 'vxlan_access_port':
                 manager = VXLANManager(device)
+                bd_id = parameters.get('bd_id') or parameters.get('bridge_domain_id')
                 result = manager.configure_vxlan_access_port(
                     parameters['interface'],
-                    parameters['bd_id']
+                    bd_id
                 )
             
             elif task_type == 'vxlan_gateway':
                 manager = VXLANManager(device)
+                bd_id = parameters.get('bd_id') or parameters.get('bridge_domain_id')
+                mask = parameters.get('mask') or parameters.get('subnet_mask')
                 result = manager.configure_vxlan_gateway(
-                    parameters['bd_id'],
+                    bd_id,
                     parameters['gateway_ip'],
-                    parameters['mask'],
+                    mask,
                     parameters.get('vbdif_id')
                 )
             
