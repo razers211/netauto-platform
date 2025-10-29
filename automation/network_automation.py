@@ -335,15 +335,9 @@ class NetworkDeviceManager:
             try:
                 self._fast_enter_huawei_config()
                 
-                # Execute with manual mode handling
-                logger.debug(f"Sending {len(commands)} commands with manual mode handling")
-                config_output = self.connection.send_config_set(
-                    commands, 
-                    delay_factor=0.8,  # Increased from 0.3 for better prompt detection
-                    cmd_verify=False,
-                    enter_config_mode=False,  # We handle manually
-                    exit_config_mode=False    # We handle manually
-                )
+                # Execute with manual interactive handling to auto-ack Y/N prompts
+                logger.debug(f"Sending {len(commands)} commands with interactive handling")
+                config_output = self._send_huawei_interactive_commands(commands)
                 
                 self._fast_exit_huawei_config()
                 
@@ -643,6 +637,20 @@ class NetworkDeviceManager:
             pass
         
         return config_output
+
+    def _send_huawei_interactive_commands(self, commands: List[str]) -> str:
+        """Send Huawei config commands using timing API and auto-respond to confirmation prompts."""
+        outputs = []
+        confirmation_tokens = ["[y/n]", " y/n ", "please choose 'yes' or 'no'", "continue?", "are you sure", "confirm"]
+        for cmd in commands:
+            out = self.connection.send_command_timing(cmd, strip_prompt=False, strip_command=False)
+            # Handle one or more confirmation prompts in sequence
+            loop_guard = 0
+            while out and any(tok in out.lower() for tok in confirmation_tokens) and loop_guard < 3:
+                out += self.connection.send_command_timing("Y", strip_prompt=False, strip_command=False)
+                loop_guard += 1
+            outputs.append(f"$ {cmd}\n{out}" if out is not None else f"$ {cmd}\n")
+        return "\n".join(outputs)
     
     def _huawei_commit_and_save_enhanced(self) -> str:
         """Enhanced Huawei commit and save using Netmiko built-in methods where possible"""
