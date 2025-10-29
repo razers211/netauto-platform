@@ -459,7 +459,7 @@ class NetworkDeviceManager:
             logger.warning(f"Exit from Huawei system-view failed: {e}")
     
     def _fast_huawei_commit_save(self) -> str:
-        """Fast commit and save for Huawei devices"""
+        """Fast commit and save for Huawei devices with timing-based prompt handling"""
         results = []
         
         try:
@@ -469,20 +469,20 @@ class NetworkDeviceManager:
                 commit_result = self.connection.commit()
                 results.append(f"--- FAST COMMIT ---\n{commit_result}")
             else:
-                # Manual fast commit
-                commit_result = self.connection.send_command("commit", delay_factor=0.2)
-                if 'y/n' in commit_result.lower() or '[y/n]' in commit_result.lower():
-                    commit_result += "\n" + self.connection.send_command("y", delay_factor=0.1)
-                results.append(f"--- FAST COMMIT ---\n{commit_result}")
+                # Manual fast commit using timing to handle Y/N
+                commit_out = self.connection.send_command_timing("commit", strip_prompt=False, strip_command=False)
+                if any(tok in (commit_out or '').lower() for tok in ['[y/n]', ' y/n ', 'confirm', 'are you sure']):
+                    commit_out += self.connection.send_command_timing("Y", strip_prompt=False, strip_command=False)
+                results.append(f"--- FAST COMMIT ---\n{commit_out}")
         except Exception as e:
             results.append(f"--- COMMIT FAILED ---\n{e}")
         
         try:
-            # Fast save
-            save_result = self.connection.send_command("save", delay_factor=0.2)
-            if 'y/n' in save_result.lower() or '[y/n]' in save_result.lower():
-                save_result += "\n" + self.connection.send_command("y", delay_factor=0.1)
-            results.append(f"--- FAST SAVE ---\n{save_result}")
+            # Fast save using timing to avoid strict expect patterns
+            save_out = self.connection.send_command_timing("save", strip_prompt=False, strip_command=False)
+            if any(tok in (save_out or '').lower() for tok in ['[y/n]', ' y/n ', 'overwrite', 'confirm']):
+                save_out += self.connection.send_command_timing("Y", strip_prompt=False, strip_command=False)
+            results.append(f"--- FAST SAVE ---\n{save_out}")
         except Exception as e:
             results.append(f"--- SAVE FAILED ---\n{e}")
         
@@ -646,8 +646,10 @@ class NetworkDeviceManager:
             out = self.connection.send_command_timing(cmd, strip_prompt=False, strip_command=False)
             # Handle one or more confirmation prompts in sequence
             loop_guard = 0
-            while out and any(tok in out.lower() for tok in confirmation_tokens) and loop_guard < 3:
-                out += self.connection.send_command_timing("Y", strip_prompt=False, strip_command=False)
+            last_chunk = out
+            while last_chunk and any(tok in last_chunk.lower() for tok in confirmation_tokens) and loop_guard < 3:
+                last_chunk = self.connection.send_command_timing("Y", strip_prompt=False, strip_command=False)
+                out = (out or "") + last_chunk
                 loop_guard += 1
             outputs.append(f"$ {cmd}\n{out}" if out is not None else f"$ {cmd}\n")
         return "\n".join(outputs)
@@ -1087,10 +1089,10 @@ class RoutingManager:
                     f"ospf {process_id} router-id {router_id}"
                 ]
             for net in networks:
-                prefix_length = self._wildcard_to_prefix(net['wildcard'])
+                area_val = self._normalize_area_id(str(net['area']))
                 commands.extend([
-                    f"area {net['area']}",
-                    f"network {net['network']} {prefix_length}",
+                    f"area {area_val}",
+                    f"network {net['network']} {net['wildcard']}",  # Huawei expects wildcard mask, not prefix length
                     "quit"
                 ])
             commands.append("quit")
@@ -1112,6 +1114,18 @@ class RoutingManager:
         mask_parts = [str(255 - int(part)) for part in wildcard_parts]
         mask = '.'.join(mask_parts)
         return self._mask_to_prefix(mask)
+    
+    def _normalize_area_id(self, area: str) -> str:
+        """Normalize Huawei OSPF area to dotted decimal (e.g., '0' -> '0.0.0.0')."""
+        area = area.strip()
+        if area.isdigit():
+            num = int(area)
+            a = (num >> 24) & 0xFF
+            b = (num >> 16) & 0xFF
+            c = (num >> 8) & 0xFF
+            d = num & 0xFF
+            return f"{a}.{b}.{c}.{d}"
+        return area
     
     def show_routes(self, vrf_name: str = None) -> str:
         """Show routing table, optionally for a specific VRF."""
