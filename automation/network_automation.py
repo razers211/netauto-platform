@@ -1194,32 +1194,40 @@ class VRFManager:
         self.device = device_manager
         self.device_type = device_manager.device_params['device_type']
     
-    def create_vrf(self, vrf_name: str, rd: str = None, description: str = None) -> str:
+    def create_vrf(self, vrf_name: str, rd: str = None, description: str = None, import_rt: str = None, export_rt: str = None) -> str:
         """Create VRF on the device."""
         if 'cisco' in self.device_type:
-            return self._create_cisco_vrf(vrf_name, rd, description)
+            return self._create_cisco_vrf(vrf_name, rd, description, import_rt, export_rt)
         elif 'huawei' in self.device_type:
-            return self._create_huawei_vrf(vrf_name, rd, description)
+            return self._create_huawei_vrf(vrf_name, rd, description, import_rt, export_rt)
         else:
             raise NetworkAutomationError(f"Unsupported device type: {self.device_type}")
     
-    def _create_cisco_vrf(self, vrf_name: str, rd: str = None, description: str = None) -> str:
+    def _create_cisco_vrf(self, vrf_name: str, rd: str = None, description: str = None, import_rt: str = None, export_rt: str = None) -> str:
         """Create VRF on Cisco device."""
         commands = [f"ip vrf {vrf_name}"]
         if rd:
             commands.append(f"rd {rd}")
         if description:
             commands.append(f"description {description}")
+        if import_rt:
+            commands.append(f"route-target import {import_rt}")
+        if export_rt:
+            commands.append(f"route-target export {export_rt}")
         
         return self.device.execute_config_commands(commands)
     
-    def _create_huawei_vrf(self, vrf_name: str, rd: str = None, description: str = None) -> str:
+    def _create_huawei_vrf(self, vrf_name: str, rd: str = None, description: str = None, import_rt: str = None, export_rt: str = None) -> str:
         """Create VRF on Huawei device."""
         commands = [f"ip vpn-instance {vrf_name}"]
         if rd:
             commands.append(f"route-distinguisher {rd}")
         if description:
             commands.append(f"description {description}")
+        if import_rt:
+            commands.append(f"vpn-target {import_rt} import-extcommunity")
+        if export_rt:
+            commands.append(f"vpn-target {export_rt} export-extcommunity")
         commands.append("quit")
         
         return self.device.execute_config_commands(commands)
@@ -1444,9 +1452,9 @@ class BGPManager:
         # Configure VPN instance with route targets
         vrf_commands = [f"ip vpn-instance {vrf_name}"]
         if import_rt:
-            vrf_commands.append(f"route-target import {import_rt}")
+            vrf_commands.append(f"vpn-target {import_rt} import-extcommunity")
         if export_rt:
-            vrf_commands.append(f"route-target export {export_rt}")
+            vrf_commands.append(f"vpn-target {export_rt} export-extcommunity")
         vrf_commands.append("quit")
         
         # Configure BGP
@@ -2752,7 +2760,9 @@ def execute_network_task(device_params: Dict, task_type: str, parameters: Dict) 
                 result = manager.create_vrf(
                     parameters['vrf_name'],
                     parameters.get('rd'),
-                    parameters.get('description')
+                    parameters.get('description'),
+                    parameters.get('import_rt'),
+                    parameters.get('export_rt')
                 )
             
             elif task_type == 'vrf_assign_interface':
