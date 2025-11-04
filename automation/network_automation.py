@@ -66,9 +66,9 @@ class NetworkDeviceManager:
         
         # Device-specific performance optimizations (balanced for reliability)
         if 'huawei' in self.device_type:
-            # Huawei optimizations - balanced speed and reliability
-            self.device_params.setdefault('global_delay_factor', 0.8)  # More conservative for Huawei
-            self.device_params.setdefault('fast_cli', True)
+            # Huawei optimizations - prioritize reliability over speed
+            self.device_params.setdefault('global_delay_factor', 1.0)
+            self.device_params['fast_cli'] = False  # Disable fast_cli for Huawei to reduce prompt issues
             
             # Configure enable mode credentials
             if 'secret' not in self.device_params and 'enable_password' not in self.device_params:
@@ -475,7 +475,16 @@ class NetworkDeviceManager:
                     commit_out += self.connection.send_command_timing("Y", strip_prompt=False, strip_command=False)
                 results.append(f"--- FAST COMMIT ---\n{commit_out}")
         except Exception as e:
-            results.append(f"--- COMMIT FAILED ---\n{e}")
+            # Attempt one reconnect and retry commit once
+            try:
+                self._reconnect_if_needed()
+                self._fast_enter_huawei_config()
+                commit_out = self.connection.send_command_timing("commit", strip_prompt=False, strip_command=False)
+                if any(tok in (commit_out or '').lower() for tok in ['[y/n]', ' y/n ', 'confirm', 'are you sure']):
+                    commit_out += self.connection.send_command_timing("Y", strip_prompt=False, strip_command=False)
+                results.append(f"--- FAST COMMIT (RETRY) ---\n{commit_out}")
+            except Exception as e2:
+                results.append(f"--- COMMIT FAILED ---\n{e2}")
         
         try:
             # Fast save using timing to avoid strict expect patterns
@@ -484,7 +493,16 @@ class NetworkDeviceManager:
                 save_out += self.connection.send_command_timing("Y", strip_prompt=False, strip_command=False)
             results.append(f"--- FAST SAVE ---\n{save_out}")
         except Exception as e:
-            results.append(f"--- SAVE FAILED ---\n{e}")
+            # Attempt one reconnect and retry save once
+            try:
+                self._reconnect_if_needed()
+                self._fast_enter_huawei_config()
+                save_out = self.connection.send_command_timing("save", strip_prompt=False, strip_command=False)
+                if any(tok in (save_out or '').lower() for tok in ['[y/n]', ' y/n ', 'overwrite', 'confirm']):
+                    save_out += self.connection.send_command_timing("Y", strip_prompt=False, strip_command=False)
+                results.append(f"--- FAST SAVE (RETRY) ---\n{save_out}")
+            except Exception as e2:
+                results.append(f"--- SAVE FAILED ---\n{e2}")
         
         return "\n\n".join(results)
     
@@ -639,11 +657,24 @@ class NetworkDeviceManager:
         return config_output
 
     def _send_huawei_interactive_commands(self, commands: List[str]) -> str:
-        """Send Huawei config commands using timing API and auto-respond to confirmation prompts."""
+        """Send Huawei config commands using timing API with auto-confirm and resilience."""
         outputs = []
         confirmation_tokens = ["[y/n]", " y/n ", "please choose 'yes' or 'no'", "continue?", "are you sure", "confirm"]
-        for cmd in commands:
-            out = self.connection.send_command_timing(cmd, strip_prompt=False, strip_command=False)
+        for idx, cmd in enumerate(commands):
+            try:
+                out = self.connection.send_command_timing(cmd, strip_prompt=False, strip_command=False)
+            except Exception as e:
+                # Attempt reconnection once if socket closed
+                if 'socket is closed' in str(e).lower() or 'timed out' in str(e).lower():
+                    try:
+                        self._reconnect_if_needed()
+                        self._fast_enter_huawei_config()
+                        out = self.connection.send_command_timing(cmd, strip_prompt=False, strip_command=False)
+                    except Exception as e2:
+                        raise e2
+                else:
+                    raise
+            
             # Handle one or more confirmation prompts in sequence
             loop_guard = 0
             last_chunk = out
@@ -651,6 +682,16 @@ class NetworkDeviceManager:
                 last_chunk = self.connection.send_command_timing("Y", strip_prompt=False, strip_command=False)
                 out = (out or "") + last_chunk
                 loop_guard += 1
+            
+            # Small pacing to keep session stable (more after context switches)
+            try:
+                if cmd.startswith(('ospf', 'bgp', 'interface', 'l2vpn-family', 'ipv4-family')):
+                    time.sleep(0.2)
+                else:
+                    time.sleep(0.05)
+            except Exception:
+                pass
+            
             outputs.append(f"$ {cmd}\n{out}" if out is not None else f"$ {cmd}\n")
         return "\n".join(outputs)
     
@@ -1079,15 +1120,16 @@ class RoutingManager:
             for net in networks:
                 commands.append(f"network {net['network']} {net['wildcard']} area {net['area']}")
         elif 'huawei' in self.device_type:
+            # Enter OSPF view, then set router id and areas/networks
             if vrf_name:
                 commands = [
-                    f"ospf {process_id} vpn-instance {vrf_name}",
-                    f"router-id {router_id}"
+                    f"ospf {process_id} vpn-instance {vrf_name}"
                 ]
             else:
                 commands = [
-                    f"ospf {process_id} router-id {router_id}"
+                    f"ospf {process_id}"
                 ]
+            commands.append(f"router id {router_id}")
             for net in networks:
                 area_val = self._normalize_area_id(str(net['area']))
                 commands.extend([
@@ -2061,6 +2103,17 @@ class DataCenterFabricManager:
         if 'huawei' not in self.device_type:
             raise NetworkAutomationError("DataCenter Fabric configuration is only supported on Huawei devices")
     
+    def _ensure_evpn_overlay(self) -> str:
+        """Ensure EVPN overlay feature is enabled and EVPN view initialized."""
+        commands = [
+            "evpn-overlay enable",
+            "commit",
+            "evpn",
+            "commit",
+            "quit"
+        ]
+        return self.device.execute_config_commands(commands)
+    
     def _validate_huawei_connection(self, strict: bool = False) -> bool:
         """Test basic connectivity and Huawei command syntax before large operations."""
         validation_results = []
@@ -2288,112 +2341,225 @@ class DataCenterFabricManager:
         return "\n\n".join(results) + summary
     
     def configure_spine_underlay(self, router_id: str, as_number: int, spine_interfaces: list,
-                                spine_ip_range: str = "10.0.0.0/30") -> str:
-        """Configure spine switch underlay (BGP + OSPF)."""
-        commands = [
-            # Configure OSPF for underlay
+                                spine_ip_range: str = "10.0.0.0/30",
+                                underlay_links: list = None) -> str:
+        """Configure spine switch underlay (BGP + OSPF) on Huawei."""
+        commands = []
+        
+        # Configure OSPF for underlay (router id and area, then network statements)
+        commands.extend([
+            f"ospf 1 router-id {router_id}",  # Single-line to avoid context flip
             "ospf 1",
-            f"router-id {router_id}",
-            "area 0.0.0.0",  # Use dotted decimal format
-            "quit",
-            "quit",
-            
-            # Configure BGP for EVPN
+            "area 0.0.0.0"
+        ])
+        
+        # Add /30 underlay networks and loopback to area 0
+        if underlay_links:
+            for link in sorted(underlay_links, key=lambda x: x['link_index']):
+                net_ip = self._calculate_link_network(spine_ip_range, link['link_index'] - 1)
+                commands.append(f"network {net_ip} 0.0.0.3")
+        else:
+            for idx, interface in enumerate(spine_interfaces):
+                net_ip = self._calculate_link_network(spine_ip_range, idx)
+                commands.append(f"network {net_ip} 0.0.0.3")
+        # Advertise loopback as host
+        commands.append(f"network {router_id} 0.0.0.0")
+        # Exit area and OSPF view
+        commands.extend(["quit", "quit"])
+        
+        # Ensure EVPN overlay is enabled before BGP EVPN
+        try:
+            self._ensure_evpn_overlay()
+        except Exception:
+            pass
+        
+        # Configure base BGP on spine
+        commands.extend([
             f"bgp {as_number}",
             f"router-id {router_id}",
-            "peer spine-leaf-evpn internal",
-            "peer spine-leaf-evpn connect-interface LoopBack0",
-            
-            # Enable EVPN address family
-            "ipv4-family unicast",
-            "undo peer spine-leaf-evpn enable",
-            "quit",
-            "l2vpn-family evpn",
-            "peer spine-leaf-evpn enable",
-            "peer spine-leaf-evpn reflect-client",
-            "quit",
-            "quit"
-        ]
+        ])
         
-        # Configure spine interfaces
-        for idx, interface in enumerate(spine_interfaces):
-            base_ip = self._calculate_spine_ip(spine_ip_range, idx)
+        # If links provided, create external group and add peers to it
+        if underlay_links:
             commands.extend([
-                f"interface {interface}",
-                f"ip address {base_ip} 255.255.255.252",  # Use subnet mask instead of prefix
-                "ospf enable 1 area 0.0.0.0",  # Correct OSPF syntax
-                "undo shutdown",
+                "group spine-leaf-evpn external"
+            ])
+            for link in sorted(underlay_links, key=lambda x: x['link_index']):
+                peer_ip = link.get('peer_loopback_ip') or f"10.255.254.{link.get('peer_device_id', 1)}"
+                peer_as = link.get('peer_as') or as_number
+                commands.extend([
+                    f"peer {peer_ip} as-number {peer_as}",
+                    f"peer {peer_ip} connect-interface LoopBack0",
+                    f"peer {peer_ip} ebgp-max-hop 2",
+                    f"peer {peer_ip} group spine-leaf-evpn",
+                ])
+            # EVPN settings for the group
+            commands.extend([
+                "l2vpn-family evpn",
+                "peer spine-leaf-evpn enable",
+                "peer spine-leaf-evpn advertise-community",
+                "peer spine-leaf-evpn reflect-client",
+                "quit",
                 "quit"
             ])
+        else:
+            # No links provided: just exit BGP view cleanly
+            commands.extend(["quit"])
         
-        # Configure loopback
+        # Configure spine interfaces with IP addressing and enable
+        if underlay_links:
+            for link in sorted(underlay_links, key=lambda x: x['link_index']):
+                base_ip = self._calculate_spine_ip(spine_ip_range, link['link_index'] - 1)
+                iface = self._normalize_huawei_interface(link['local_interface'])
+                commands.extend([
+                    f"interface {iface}",
+                    "undo portswitch",
+                    f"ip address {base_ip} 255.255.255.252",
+                    "undo shutdown",
+                    "quit"
+                ])
+        else:
+            for idx, interface in enumerate(spine_interfaces):
+                base_ip = self._calculate_spine_ip(spine_ip_range, idx)
+                iface = self._normalize_huawei_interface(interface)
+                commands.extend([
+                    f"interface {iface}",
+                    "undo portswitch",
+                    f"ip address {base_ip} 255.255.255.252",
+                    "undo shutdown",
+                    "quit"
+                ])
+        
+        # Configure loopback address (no shutdown command on LoopBack)
         commands.extend([
             "interface LoopBack0",
-            f"ip address {router_id} 255.255.255.255",  # Use subnet mask instead of prefix
-            "ospf enable 1 area 0.0.0.0",  # Correct OSPF syntax
+            f"ip address {router_id} 255.255.255.255",
             "quit"
         ])
         
-        # Use chunked execution for large command sets to prevent timeouts
-        if len(commands) > 15:
-            return self._execute_commands_in_chunks(commands, chunk_size=8)
-        else:
-            return self.device.execute_config_commands(commands)
+        # Execute all commands in a single batch to preserve context
+        return self.device.execute_config_commands(commands)
     
     def configure_leaf_underlay(self, router_id: str, as_number: int, spine_interfaces: list,
-                               leaf_id: int, spine_ip_range: str = "10.0.0.0/30") -> str:
-        """Configure leaf switch underlay (BGP + OSPF)."""
-        commands = [
-            # Configure OSPF for underlay
+                               leaf_id: int, spine_ip_range: str = "10.0.0.0/30",
+                               spine_peer_as_numbers: list = None,
+                               uplink_spine_indices: list = None,
+                               underlay_links: list = None) -> str:
+        """Configure leaf switch underlay (BGP + OSPF) on Huawei.
+        spine_peer_as_numbers: optional list of remote ASNs for each spine peer (order must
+        match the implied spine loopback order 10.255.255.1, .2, ...). If not provided,
+        falls back to using local as_number.
+        uplink_spine_indices: optional list mapping each uplink interface to the target spine
+        index (1-based) as ordered in the spine list; drives deterministic /30 selection.
+        """
+        commands = []
+        
+        # OSPF: set router id, area, and advertise networks
+        commands.extend([
+            f"ospf 1 router-id {router_id}",
             "ospf 1",
-            f"router-id {router_id}",
-            "area 0.0.0.0",  # Use dotted decimal format
-            "quit",
-            "quit",
-            
-            # Configure BGP for EVPN
+            "area 0.0.0.0"
+        ])
+        if underlay_links:
+            for link in sorted(underlay_links, key=lambda x: x['link_index']):
+                net_ip = self._calculate_link_network(spine_ip_range, link['link_index'] - 1)
+                commands.append(f"network {net_ip} 0.0.0.3")
+        else:
+            for idx, interface in enumerate(spine_interfaces):
+                net_index = (uplink_spine_indices[idx] - 1) if (uplink_spine_indices and idx < len(uplink_spine_indices)) else idx
+                net_ip = self._calculate_link_network(spine_ip_range, net_index)
+                commands.append(f"network {net_ip} 0.0.0.3")
+        commands.append(f"network {router_id} 0.0.0.0")
+        commands.extend(["quit", "quit"])
+        
+        # Ensure EVPN overlay is enabled before BGP EVPN
+        try:
+            self._ensure_evpn_overlay()
+        except Exception:
+            pass
+        
+        # BGP base with external group definition (stay in BGP view)
+        commands.extend([
             f"bgp {as_number}",
             f"router-id {router_id}",
-            
-            # Configure loopback
+            "group spine-leaf-evpn external"
+        ])
+        
+        # Configure loopback interface
+        commands.extend([
             "interface LoopBack0",
-            f"ip address {router_id} 255.255.255.255",  # Use subnet mask instead of prefix
-            "ospf enable 1 area 0.0.0.0",  # Correct OSPF syntax
+            f"ip address {router_id} 255.255.255.255",
+            "undo shutdown",
             "quit"
-        ]
+        ])
         
-        # Configure leaf uplink interfaces to spines
-        for idx, interface in enumerate(spine_interfaces):
-            peer_ip = self._calculate_leaf_ip(spine_ip_range, leaf_id, idx)
-            commands.extend([
-                f"interface {interface}",
-                f"ip address {peer_ip} 255.255.255.252",  # Use subnet mask instead of prefix
-                "ospf enable 1 area 0.0.0.0",  # Correct OSPF syntax
-                "undo shutdown",
-                "quit"
-            ])
-        
-        # Add spine peers to BGP
-        spine_loopbacks = self._get_spine_loopbacks(spine_interfaces)
-        for spine_ip in spine_loopbacks:
-            commands.extend([
-                f"bgp {as_number}",
-                f"peer {spine_ip} as-number {as_number}",
-                f"peer {spine_ip} connect-interface LoopBack0",
-                "ipv4-family unicast",
-                f"undo peer {spine_ip} enable",
-                "quit",
-                "l2vpn-family evpn",
-                f"peer {spine_ip} enable",
-                "quit",
-                "quit"
-            ])
-        
-        # Use chunked execution for large command sets to prevent timeouts
-        if len(commands) > 15:
-            return self._execute_commands_in_chunks(commands, chunk_size=8)
+        # Configure leaf uplink interfaces to spines (L3 addressing)
+        if underlay_links:
+            for link in sorted(underlay_links, key=lambda x: x['link_index']):
+                net_index = link['link_index'] - 1
+                peer_ip = self._calculate_leaf_ip(spine_ip_range, leaf_id, net_index)
+                iface = self._normalize_huawei_interface(link['local_interface'])
+                commands.extend([
+                    f"interface {iface}",
+                    "undo portswitch",
+                    f"ip address {peer_ip} 255.255.255.252",
+                    "undo shutdown",
+                    "quit"
+                ])
         else:
-            return self.device.execute_config_commands(commands)
+            for idx, interface in enumerate(spine_interfaces):
+                net_index = (uplink_spine_indices[idx] - 1) if (uplink_spine_indices and idx < len(uplink_spine_indices)) else idx
+                peer_ip = self._calculate_leaf_ip(spine_ip_range, leaf_id, net_index)
+                iface = self._normalize_huawei_interface(interface)
+                commands.extend([
+                    f"interface {iface}",
+                    "undo portswitch",
+                    f"ip address {peer_ip} 255.255.255.252",
+                    "undo shutdown",
+                    "quit"
+                ])
+        
+        # Add spine peers to BGP for EVPN (assign to external group)
+        if underlay_links:
+            peers = [l.get('peer_loopback_ip') for l in sorted(underlay_links, key=lambda x: x['link_index'])]
+            peer_ases = [l.get('peer_as', as_number) for l in sorted(underlay_links, key=lambda x: x['link_index'])]
+            commands.extend([f"bgp {as_number}"])
+            for spine_ip, remote_as in zip(peers, peer_ases):
+                commands.extend([
+                    f"peer {spine_ip} as-number {remote_as}",
+                    f"peer {spine_ip} connect-interface LoopBack0",
+                    f"peer {spine_ip} ebgp-max-hop 2",
+                    f"peer {spine_ip} group spine-leaf-evpn",
+                ])
+            # EVPN group enable
+            commands.extend([
+                "l2vpn-family evpn",
+                "peer spine-leaf-evpn enable",
+                "peer spine-leaf-evpn advertise-community",
+                "quit",
+            ])
+        else:
+            spine_loopbacks = self._get_spine_loopbacks(spine_interfaces)
+            commands.extend([f"bgp {as_number}"])
+            for idx, spine_ip in enumerate(spine_loopbacks):
+                remote_as = (spine_peer_as_numbers[idx]
+                             if spine_peer_as_numbers and idx < len(spine_peer_as_numbers)
+                             else as_number)
+                commands.extend([
+                    f"peer {spine_ip} as-number {remote_as}",
+                    f"peer {spine_ip} connect-interface LoopBack0",
+                    f"peer {spine_ip} ebgp-max-hop 2",
+                    f"peer {spine_ip} group spine-leaf-evpn",
+                ])
+            commands.extend([
+                "l2vpn-family evpn",
+                "peer spine-leaf-evpn enable",
+                "peer spine-leaf-evpn advertise-community",
+                "quit",
+            ])
+        
+        # Execute in one go to preserve contexts
+        return self.device.execute_config_commands(commands)
     
     def deploy_tenant_network(self, tenant_name: str, vni: int, vlan_id: int,
                             gateway_ip: str, subnet_mask: str, 
@@ -2569,7 +2735,10 @@ class DataCenterFabricManager:
             router_id = fabric_config.get('loopback_ip') or f"10.255.255.{device_id}"
             spine_interfaces = fabric_config.get('spine_interfaces', [])
             spine_ip_range = fabric_config.get('underlay_ip_range', '10.0.0.0/30')
-            return self.configure_spine_underlay(router_id, as_number, spine_interfaces, spine_ip_range)
+            return self.configure_spine_underlay(
+                router_id, as_number, spine_interfaces, spine_ip_range,
+                fabric_config.get('underlay_links')
+            )
         
         elif device_role == 'leaf' or device_role == 'border_leaf':
             # Use loopback_ip from form, fallback to auto-generated
@@ -2579,7 +2748,12 @@ class DataCenterFabricManager:
             spine_ip_range = fabric_config.get('underlay_ip_range', '10.0.0.0/30')
             
             # Configure underlay
-            result = self.configure_leaf_underlay(router_id, as_number, spine_interfaces, device_id, spine_ip_range)
+            result = self.configure_leaf_underlay(
+                router_id, as_number, spine_interfaces, device_id, spine_ip_range,
+                fabric_config.get('spine_peer_as_numbers'),
+                fabric_config.get('uplink_spine_indices'),
+                fabric_config.get('underlay_links')
+            )
             
             # Configure NVE interface
             nve_config = fabric_config.get('nve_config', {})
@@ -2634,13 +2808,32 @@ class DataCenterFabricManager:
         """Calculate leaf interface IP address."""
         base_ip = ip_range.split('/')[0]
         octets = base_ip.split('.')
-        octets[3] = str(int(octets[3]) + (interface_idx * 4) + 1 + leaf_id)
+        octets[3] = str(int(octets[3]) + (interface_idx * 4) + 2)  # second usable in /30 for leaf
         return '.'.join(octets)
     
     def _get_spine_loopbacks(self, spine_interfaces: list) -> list:
         """Get spine loopback addresses for BGP peering."""
         # Return predefined spine loopbacks - in production, this would be dynamic
         return [f"10.255.255.{i+1}" for i in range(len(spine_interfaces))]
+    
+    def _calculate_link_network(self, ip_range: str, interface_idx: int) -> str:
+        """Calculate /30 network address for given link index based on base ip_range."""
+        base_ip = ip_range.split('/')[0]
+        octets = base_ip.split('.')
+        octets[3] = str(int(octets[3]) + (interface_idx * 4))
+        return '.'.join(octets)
+    
+    def _normalize_huawei_interface(self, name: str) -> str:
+        """Normalize Huawei interface names conservatively (keep GE as-is)."""
+        n = name.strip()
+        if n.startswith('GE'):
+            return n  # Keep short GE naming which your device accepts
+        if n.startswith('XGE'):
+            return '10GE' + n[3:]
+        if n.lower().startswith('loopback'):
+            # Huawei uses LoopBack with capital B sometimes; accept both
+            return 'LoopBack' + n.split('loopback',1)[-1] if 'loopback' in n.lower() else n
+        return n
     
     def _mask_to_prefix(self, mask: str) -> int:
         """Convert subnet mask to prefix length."""

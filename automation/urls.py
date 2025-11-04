@@ -66,6 +66,7 @@ urlpatterns = [
     path('automation/datacenter/tenant-network/', views.tenant_network, name='tenant_network'),
     path('automation/datacenter/external-connectivity/', views.external_connectivity, name='external_connectivity'),
     path('automation/datacenter/multi-tenant/', views.multi_tenant_deployment, name='multi_tenant_deployment'),
+    path('automation/datacenter/fabric/deploy-all/', views.full_fabric_deploy, name='full_fabric_deploy'),
     
     # API endpoints
     path('api/tasks/<int:task_id>/status/', views.api_task_status, name='api_task_status'),

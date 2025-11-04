@@ -16,7 +16,7 @@ from .forms import (
     VLANInterfaceConfigForm, BGPRouteReflectorForm, BGPConfederationForm, BGPMultipathForm,
     OSPFAreaForm, OSPFAuthenticationForm, EVPNInstanceForm, BGPEVPNForm, VXLANTunnelForm,
     NVEInterfaceForm, VXLANGatewayForm, VXLANAccessPortForm, DataCenterFabricForm,
-    TenantNetworkForm, ExternalConnectivityForm, MultiTenantDeploymentForm,
+    TenantNetworkForm, ExternalConnectivityForm, MultiTenantDeploymentForm, FullFabricDeploymentForm,
     DeviceSelectionForm, ShowRoutesForm
 )
 from .network_automation import execute_network_task
@@ -1637,6 +1637,164 @@ def multi_tenant_deployment(request):
         'title': 'Deploy Multi-Tenant Configuration'
     }
     return render(request, 'automation/multi_tenant_deployment_form.html', context)
+
+
+@login_required
+def full_fabric_deploy(request):
+    """Deploy the entire datacenter fabric at once across all selected devices.
+    Pre-fills devices list with all active devices and allows per-device AS numbers.
+    """
+    if request.method == 'POST':
+        form = FullFabricDeploymentForm(request.POST)
+        if form.is_valid():
+            devices_data = form.cleaned_data['devices_json']
+            links_data = form.cleaned_data.get('links_json', [])
+            tenant_networks = form.cleaned_data.get('tenant_networks_json', [])
+            underlay_range = form.cleaned_data['underlay_ip_range']
+            skip_validation = form.cleaned_data.get('skip_validation', False)
+
+            # Resolve devices by name and submit a task per device
+            task_ids = []
+            name_to_device = {d.name: d for d in Device.objects.filter(is_active=True)}
+            devices_by_name = {d['name']: d for d in devices_data}
+            # Determine spine ASNs in stable order (by device_id) for mapping
+            spines_sorted = sorted(
+                [e for e in devices_data if e.get('role') == 'spine'],
+                key=lambda x: x.get('device_id', 0)
+            )
+            spine_as_list = [s.get('as_number') for s in spines_sorted]
+
+            # Assign link indices deterministically and enrich with peer AS/IDs/loopbacks
+            indexed_links = []
+            for i, l in enumerate(links_data):
+                idx = l.get('link_index') or (i + 1)
+                spine_name = l['spine']
+                leaf_name = l['leaf']
+                spine_entry = devices_by_name.get(spine_name, {})
+                leaf_entry = devices_by_name.get(leaf_name, {})
+                # Determine peer loopbacks (prefer explicit loopback_ip if present)
+                spine_loop = spine_entry.get('loopback_ip') or (f"10.255.255.{spine_entry.get('device_id', 1)}" if spine_entry else None)
+                leaf_loop = leaf_entry.get('loopback_ip') or (f"10.255.254.{leaf_entry.get('device_id', 1)}" if leaf_entry else None)
+                indexed_links.append({
+                    'link_index': idx,
+                    'spine': spine_name,
+                    'spine_interface': l['spine_interface'],
+                    'spine_as': spine_entry.get('as_number'),
+                    'spine_device_id': spine_entry.get('device_id'),
+                    'spine_loopback_ip': spine_loop,
+                    'leaf': leaf_name,
+                    'leaf_interface': l['leaf_interface'],
+                    'leaf_as': leaf_entry.get('as_number'),
+                    'leaf_device_id': leaf_entry.get('device_id'),
+                    'leaf_loopback_ip': leaf_loop
+                })
+
+            for entry in devices_data:
+                dev_obj = name_to_device.get(entry['name'])
+                if not dev_obj:
+                    continue  # Skip unknown names silently
+
+                # Base params common to all roles
+                fabric_params = {
+                    'device_role': entry['role'],
+                    'device_id': entry['device_id'],
+                    'as_number': entry['as_number'],  # per-device AS number
+                    'loopback_ip': entry.get('loopback_ip') or None,
+                    'underlay_ip_range': underlay_range,
+                    'spine_interfaces': entry.get('spine_interfaces', []),
+                    'tenant_networks': tenant_networks,
+                    'skip_validation': skip_validation,
+                }
+
+                # Attach explicit underlay links for this device, if provided
+                if indexed_links:
+                    if entry.get('role') == 'spine':
+                        my_links = [
+                            {
+                                'link_index': l['link_index'],
+                                'local_interface': l['spine_interface'],
+                                'peer_device': l['leaf'],
+                                'peer_interface': l['leaf_interface'],
+                                'peer_as': l.get('leaf_as'),
+                                'peer_device_id': l.get('leaf_device_id'),
+                                'peer_loopback_ip': l.get('leaf_loopback_ip')
+                            }
+                            for l in indexed_links if l['spine'] == entry['name']
+                        ]
+                    else:
+                        my_links = [
+                            {
+                                'link_index': l['link_index'],
+                                'local_interface': l['leaf_interface'],
+                                'peer_device': l['spine'],
+                                'peer_interface': l['spine_interface'],
+                                'peer_as': l.get('spine_as'),
+                                'peer_device_id': l.get('spine_device_id'),
+                                'peer_loopback_ip': l.get('spine_loopback_ip')
+                            }
+                            for l in indexed_links if l['leaf'] == entry['name']
+                        ]
+                    fabric_params['underlay_links'] = sorted(my_links, key=lambda x: x['link_index'])
+
+                # For leaves/border leaves, provide remote spine ASNs and link indices aligned with uplinks
+                if entry.get('role') in ('leaf', 'border_leaf'):
+                    if indexed_links:
+                        # Order by link_index and map to spine ASNs by spine name
+                        leaf_links = [l for l in indexed_links if l['leaf'] == entry['name']]
+                        leaf_links_sorted = sorted(leaf_links, key=lambda x: x['link_index'])
+                        spine_as_by_name = {s['name']: s['as_number'] for s in spines_sorted}
+                        fabric_params['spine_peer_as_numbers'] = [spine_as_by_name.get(l['spine']) for l in leaf_links_sorted]
+                    else:
+                        uplinks = entry.get('spine_interfaces', [])
+                        fabric_params['spine_peer_as_numbers'] = spine_as_list[:len(uplinks)]
+                        # Determine spine indices per uplink: prefer explicit 'to_spines' (by name), else 1..N
+                        to_spines = entry.get('to_spines') or []
+                        if to_spines and isinstance(to_spines, list) and len(to_spines) == len(uplinks):
+                            spine_name_to_index = {s['name']: i+1 for i, s in enumerate(spines_sorted)}
+                            uplink_indices = [spine_name_to_index.get(n, i+1) for i, n in enumerate(to_spines)]
+                        else:
+                            uplink_indices = [i+1 for i in range(len(uplinks))]
+                        fabric_params['uplink_spine_indices'] = uplink_indices
+                task = NetworkTask.objects.create(
+                    device=dev_obj,
+                    task_type='datacenter_fabric',
+                    parameters=fabric_params,
+                    created_by=request.user
+                )
+                task_ids.append(task.id)
+
+                thread = threading.Thread(target=execute_task_async, args=(task,))
+                thread.start()
+
+            messages.success(request, f'Full fabric deployment tasks submitted for {len(task_ids)} devices')
+            return redirect('task_detail', task_id=task_ids[0] if task_ids else 1)
+    else:
+        # Build a sensible default devices list from active inventory
+        devices = list(Device.objects.filter(is_active=True).order_by('name'))
+        spines = [d for d in devices if 'spine' in d.name.lower()]
+        border_leaves = [d for d in devices if 'border' in d.name.lower() and d not in spines]
+        leaves = [d for d in devices if d not in spines and d not in border_leaves]
+
+        entries = []
+        # Assign IDs: spines start at 1, border leaves at 9x, leaves at 10+
+        for idx, d in enumerate(spines, start=1):
+            entries.append({'name': d.name, 'role': 'spine', 'device_id': idx, 'as_number': 65000, 'spine_interfaces': []})
+        for idx, d in enumerate(border_leaves, start=90):
+            entries.append({'name': d.name, 'role': 'border_leaf', 'device_id': idx, 'as_number': 65000, 'spine_interfaces': []})
+        for idx, d in enumerate(leaves, start=10):
+            entries.append({'name': d.name, 'role': 'leaf', 'device_id': idx, 'as_number': 65000, 'spine_interfaces': []})
+
+        initial = {
+            'devices_json': json.dumps(entries, indent=2),
+            'tenant_networks_json': json.dumps([], indent=2),
+        }
+        form = FullFabricDeploymentForm(initial=initial)
+
+    context = {
+        'form': form,
+        'title': 'Deploy Whole Datacenter Fabric'
+    }
+    return render(request, 'automation/full_fabric_deployment_form.html', context)
 
 
 # API Views

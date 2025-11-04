@@ -844,3 +844,105 @@ class MultiTenantDeploymentForm(forms.Form):
         }),
         help_text='Device names to deploy tenant networks to (one per line)'
     )
+
+
+class FullFabricDeploymentForm(forms.Form):
+    fabric_name = forms.CharField(
+        max_length=50,
+        widget=forms.TextInput(attrs={'class': 'form-control', 'placeholder': 'DC1_FABRIC'}),
+        help_text='Identifier for this fabric deployment'
+    )
+    underlay_ip_range = forms.CharField(
+        max_length=20,
+        initial='10.0.0.0/30',
+        widget=forms.TextInput(attrs={'class': 'form-control', 'placeholder': '10.0.0.0/30'}),
+        help_text='Base /30 pool used for spine-leaf links'
+    )
+    devices_json = forms.CharField(
+        widget=forms.Textarea(attrs={
+            'class': 'form-control',
+            'rows': 12,
+            'placeholder': '''[
+  {"name": "spine-01", "role": "spine", "device_id": 1,  "as_number": 65000, "spine_interfaces": ["100GE1/0/1", "100GE1/0/2"]},
+  {"name": "leaf-01",  "role": "leaf",  "device_id": 11, "as_number": 65000, "spine_interfaces": ["GE1/0/51", "GE1/0/52"]}
+]'''
+        }),
+        help_text='JSON array of devices with role, unique device_id, per-device as_number, and uplink interfaces'
+    )
+    links_json = forms.CharField(
+        required=False,
+        widget=forms.Textarea(attrs={
+            'class': 'form-control',
+            'rows': 8,
+            'placeholder': '''[
+  {"spine": "spine-01", "spine_interface": "100GE1/0/1", "leaf": "leaf-01", "leaf_interface": "GE1/0/51"},
+  {"spine": "spine-02", "spine_interface": "100GE1/0/1", "leaf": "leaf-01", "leaf_interface": "GE1/0/52"}
+]'''
+        }),
+        help_text='Optional: explicit spine↔leaf link mapping (each entry defines a /30 link)'
+    )
+    tenant_networks_json = forms.CharField(
+        required=False,
+        widget=forms.Textarea(attrs={
+            'class': 'form-control',
+            'rows': 8,
+            'placeholder': '''[
+  {"name": "WEB", "vni": 10001, "vlan_id": 100, "gateway_ip": "192.168.100.1", "subnet_mask": "255.255.255.0", "access_interfaces": []}
+]'''
+        }),
+        help_text='Optional: Tenant networks to deploy to all leaves/border leaves'
+    )
+    skip_validation = forms.BooleanField(
+        required=False,
+        initial=False,
+        widget=forms.CheckboxInput(attrs={'class': 'form-check-input'}),
+        help_text='Skip pre-check validation on devices'
+    )
+
+    def clean_devices_json(self):
+        raw = self.cleaned_data['devices_json']
+        try:
+            data = json.loads(raw)
+            if not isinstance(data, list) or not data:
+                raise forms.ValidationError('Provide a non-empty JSON array of devices.')
+            for d in data:
+                if not all(k in d for k in ['name', 'role', 'device_id', 'as_number', 'spine_interfaces']):
+                    raise forms.ValidationError("Each device needs 'name', 'role', 'device_id', 'as_number', 'spine_interfaces'.")
+                if d['role'] not in ['spine', 'leaf', 'border_leaf']:
+                    raise forms.ValidationError("Device role must be spine, leaf or border_leaf.")
+                if not isinstance(d['spine_interfaces'], list):
+                    raise forms.ValidationError("'spine_interfaces' must be a list of interface names.")
+            return data
+        except json.JSONDecodeError:
+            raise forms.ValidationError('Invalid JSON format.')
+
+    def clean_links_json(self):
+        raw = self.cleaned_data.get('links_json')
+        if not raw:
+            return []
+        try:
+            data = json.loads(raw)
+            if not isinstance(data, list):
+                raise forms.ValidationError('Links must be a JSON array.')
+            for i, l in enumerate(data):
+                if not all(k in l for k in ['spine', 'spine_interface', 'leaf', 'leaf_interface']):
+                    raise forms.ValidationError(f'Link #{i+1} must include spine, spine_interface, leaf, leaf_interface.')
+            return data
+        except json.JSONDecodeError:
+            raise forms.ValidationError('Invalid JSON format for links.')
+
+    def clean_tenant_networks_json(self):
+        raw = self.cleaned_data.get('tenant_networks_json')
+        if not raw:
+            return []
+        try:
+            data = json.loads(raw)
+            if not isinstance(data, list):
+                raise forms.ValidationError('Tenant networks must be a JSON array.')
+            required = {'name','vni','vlan_id','gateway_ip','subnet_mask'}
+            for t in data:
+                if not required.issubset(t.keys()):
+                    raise forms.ValidationError('Each tenant must include name,vni,vlan_id,gateway_ip,subnet_mask.')
+            return data
+        except json.JSONDecodeError:
+            raise forms.ValidationError('Invalid JSON format for tenant networks.')
