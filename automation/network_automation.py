@@ -14,9 +14,9 @@ except ImportError:
     JuniperDeviceManager = None
 
 try:
-    from .evpn_l2vpn import EVPNManager
+    from .evpn_l2vpn import EVPNManager as JuniperEVPNManager
 except ImportError:
-    EVPNManager = None
+    JuniperEVPNManager = None
 
 logger = logging.getLogger(__name__)
 
@@ -3130,12 +3130,16 @@ def execute_network_task(device_params: Dict, task_type: str, parameters: Dict) 
             
             # EVPN tasks
             elif task_type == 'evpn_instance':
-                manager = EVPNManager(device)
-                result = manager.configure_evpn_instance(
-                    parameters['evpn_instance'],
-                    parameters['route_distinguisher'],
-                    parameters['export_rt'],
-                    parameters['import_rt']
+                manager = JuniperEVPNManager(device)
+                result = manager.create_evpn_instance(
+                    parameters['instance_name'],
+                    parameters['vpls_id'],
+                    parameters.get('rd'),
+                    parameters.get('route_target'),
+                    parameters.get('route_target_id'),
+                    parameters.get('encapsulation', 'mpls'),
+                    parameters.get('replication_type', 'ingress'),
+                    parameters.get('description')
                 )
             
             elif task_type == 'bgp_evpn':
@@ -3156,10 +3160,13 @@ def execute_network_task(device_params: Dict, task_type: str, parameters: Dict) 
                 )
             
             elif task_type == 'bridge_domain':
-                manager = EVPNManager(device)
-                result = manager.configure_bridge_domain(
-                    parameters['bd_id'],
-                    parameters.get('evpn_instance')
+                manager = JuniperEVPNManager(device)
+                result = manager.add_bridge_domain_to_evpn(
+                    parameters['instance_name'],
+                    parameters['bd_name'],
+                    parameters['vlan_id'],
+                    parameters.get('interface'),
+                    parameters.get('description')
                 )
             
             elif task_type == 'evpn_ethernet_segment':
@@ -3242,9 +3249,9 @@ def execute_network_task(device_params: Dict, task_type: str, parameters: Dict) 
             
             # EVPN/L2VPN task handlers
             elif task_type == 'l2vpws':
-                if EVPNManager:
-                    manager = EVPNManager(device)
-                    result = manager.configure_l2vpws(
+                if JuniperEVPNManager:
+                    manager = JuniperEVPNManager(device)
+                    result = manager.create_l2vpws(
                         parameters['service_name'],
                         parameters['local_if'],
                         parameters['remote_ip'],
@@ -3255,42 +3262,13 @@ def execute_network_task(device_params: Dict, task_type: str, parameters: Dict) 
                     raise NetworkAutomationError("EVPNManager not available")
             
             elif task_type == 'l2vpn_vpls':
-                if EVPNManager:
-                    manager = EVPNManager(device)
-                    result = manager.configure_l2vpn_vpls(
+                if JuniperEVPNManager:
+                    manager = JuniperEVPNManager(device)
+                    result = manager.create_l2vpn_vpls(
                         parameters['service_name'],
                         parameters['vpls_id'],
                         parameters.get('rd'),
                         parameters.get('rt_both'),
-                        parameters.get('description')
-                    )
-                else:
-                    raise NetworkAutomationError("EVPNManager not available")
-            
-            elif task_type == 'evpn_instance':
-                if EVPNManager:
-                    manager = EVPNManager(device)
-                    result = manager.configure_evpn_instance(
-                        parameters['instance_name'],
-                        parameters['vpls_id'],
-                        parameters.get('rd'),
-                        parameters.get('route_target'),
-                        parameters.get('route_target_id'),
-                        parameters.get('encapsulation', 'mpls'),
-                        parameters.get('replication_type', 'ingress'),
-                        parameters.get('description')
-                    )
-                else:
-                    raise NetworkAutomationError("EVPNManager not available")
-            
-            elif task_type == 'bridge_domain':
-                if EVPNManager:
-                    manager = EVPNManager(device)
-                    result = manager.configure_bridge_domain(
-                        parameters['bd_name'],
-                        parameters['instance_name'],
-                        parameters['vlan_id'],
-                        parameters.get('interface'),
                         parameters.get('description')
                     )
                 else:

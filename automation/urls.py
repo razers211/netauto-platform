@@ -73,7 +73,7 @@ urlpatterns = [
     # EVPN/L2VPN operations
     path('automation/l2vpn/l2vpws/', evpn_l2vpn_views.l2vpws, name='l2vpws'),
     path('automation/l2vpn/vpls/', evpn_l2vpn_views.l2vpn_vpls, name='l2vpn_vpls'),
-    path('automation/evpn/instance/', evpn_l2vpn_views.evpn_instance, name='evpn_instance_config'),
+    path('automation/evpn/instance/config/', evpn_l2vpn_views.evpn_instance, name='evpn_instance_config'),
     path('automation/evpn/bridge-domain/', evpn_l2vpn_views.bridge_domain, name='bridge_domain_config'),
     
     # API endpoints

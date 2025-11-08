@@ -11,10 +11,10 @@
     {% block extra_css %}{% endblock %}
 </head>
 <body>
-    <nav class="navbar navbar-expand-lg navbar-dark bg-dark">
-        <div class="container">
+    <nav class="navbar navbar-expand-md navbar-dark bg-dark sticky-top">
+        <div class="container-fluid">
             <a class="navbar-brand" href="{% url 'index' %}">
-                <i class="bi bi-router-fill"></i> ZeroConfig Platform
+                <i class="bi bi-router-fill"></i> <span class="d-none d-lg-inline">ZeroConfig</span>
             </a>
             <button class="navbar-toggler" type="button" data-bs-toggle="collapse" data-bs-target="#navbarNav">
                 <span class="navbar-toggler-icon"></span>
@@ -22,8 +22,11 @@
             <div class="collapse navbar-collapse" id="navbarNav">
                 <ul class="navbar-nav me-auto">
                     <li class="nav-item">
-                        <a class="nav-link" href="{% url 'index' %}">
+                        <a class="nav-link d-none d-xxl-inline-flex" href="{% url 'index' %}">
                             <i class="bi bi-speedometer2"></i> Dashboard
+                        </a>
+                        <a class="nav-link d-xxl-none" href="{% url 'index' %}" title="Dashboard">
+                            <i class="bi bi-speedometer2"></i>
                         </a>
                     </li>
                     <li class="nav-item dropdown">
@@ -52,6 +55,7 @@
                         <ul class="dropdown-menu">
                             <li><a class="dropdown-item" href="{% url 'interface_config' %}">Configure Physical Interface</a></li>
                             <li><a class="dropdown-item" href="{% url 'vlan_interface_config' %}">Configure VLAN Interface</a></li>
+                            <li><a class="dropdown-item" href="{% url 'ae_config' %}">Configure Aggregated Ethernet (AE)</a></li>
                         </ul>
                     </li>
                     <li class="nav-item dropdown">
@@ -74,12 +78,19 @@
                     </li>
                     <li class="nav-item dropdown">
                         <a class="nav-link dropdown-toggle" href="#" role="button" data-bs-toggle="dropdown">
-                            <i class="bi bi-share"></i> BGP
+                            <i class="bi bi-share"></i> BGP & VPN
                         </a>
                         <ul class="dropdown-menu">
+                            <li><h6 class="dropdown-header">BGP Configuration</h6></li>
                             <li><a class="dropdown-item" href="{% url 'bgp_neighbor' %}">Configure Neighbor</a></li>
                             <li><a class="dropdown-item" href="{% url 'bgp_network' %}">Advertise Network</a></li>
                             <li><a class="dropdown-item" href="{% url 'bgp_vrf_config' %}">VRF Configuration</a></li>
+                            <li><hr class="dropdown-divider"></li>
+                            <li><h6 class="dropdown-header">EVPN/L2VPN</h6></li>
+                            <li><a class="dropdown-item" href="{% url 'l2vpws' %}">Configure L2VPWS</a></li>
+                            <li><a class="dropdown-item" href="{% url 'l2vpn_vpls' %}">Configure L2VPN VPLS</a></li>
+                            <li><a class="dropdown-item" href="{% url 'evpn_instance_config' %}">Configure EVPN Instance</a></li>
+                            <li><a class="dropdown-item" href="{% url 'bridge_domain_config' %}">Configure Bridge Domain</a></li>
                         </ul>
                     </li>
                     <li class="nav-item dropdown">
@@ -96,10 +107,10 @@
                     </li>
                     <li class="nav-item dropdown">
                         <a class="nav-link dropdown-toggle" href="#" role="button" data-bs-toggle="dropdown">
-                            <i class="bi bi-eye"></i> Show Commands
+                            <i class="bi bi-eye"></i> Commands
                         </a>
                         <ul class="dropdown-menu">
-                            <li><a class="dropdown-item" href="{% url 'show_command' 'version' %}">Version Info</a></li>
+                            <li><a class="dropdown-item" href="{% url 'show_command' 'version' %}">Version</a></li>
                             <li><a class="dropdown-item" href="{% url 'show_command' 'interfaces' %}">Interfaces</a></li>
                             <li><a class="dropdown-item" href="{% url 'show_command' 'vlan' %}">VLANs</a></li>
                             <li><a class="dropdown-item" href="{% url 'show_command' 'routes' %}">Routes</a></li>
@@ -107,8 +118,11 @@
                         </ul>
                     </li>
                     <li class="nav-item">
-                        <a class="nav-link" href="{% url 'task_list' %}">
+                        <a class="nav-link d-none d-xl-inline-flex" href="{% url 'task_list' %}">
                             <i class="bi bi-list-task"></i> Tasks
+                        </a>
+                        <a class="nav-link d-xl-none" href="{% url 'task_list' %}" title="Tasks">
+                            <i class="bi bi-list-task"></i>
                         </a>
                     </li>
                 </ul>

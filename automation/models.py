@@ -5,7 +5,7 @@ import json
 
 
 class Device(models.Model):
-DEVICE_TYPES = [
+    DEVICE_TYPES = [
         ('cisco_ios', 'Cisco IOS'),
         ('cisco_xe', 'Cisco IOS-XE'),
         ('cisco_nxos', 'Cisco NX-OS'),
@@ -78,8 +78,7 @@ class NetworkTask(models.Model):
         ('ae_config', 'Configure AE Interface'),
         ('l2vpws', 'L2VPWS Instance'),
         ('l2vpn_vpls', 'L2VPN VPLS Instance'),
-        ('bgp_evpn', 'BGP EVPN'),
-        ('evpn_instance', 'EVPN Instance'),
+        ('bridge_domain', 'Bridge Domain Configuration'),
     ]
     
     STATUS_CHOICES = [
@@ -90,7 +89,7 @@ class NetworkTask(models.Model):
     ]
     
     device = models.ForeignKey(Device, on_delete=models.CASCADE)
-    task_type = models.CharField(max_length=25, choices=TASK_TYPES)
+    task_type = models.CharField(max_length=30, choices=TASK_TYPES)
     parameters = models.JSONField(default=dict)  # Task-specific parameters
     status = models.CharField(max_length=20, choices=STATUS_CHOICES, default='pending')
     created_by = models.ForeignKey(User, on_delete=models.CASCADE)
@@ -118,6 +117,9 @@ class TaskResult(models.Model):
     success = models.BooleanField(default=True)
     execution_time = models.FloatField()  # seconds
     created_at = models.DateTimeField(auto_now_add=True)
+    
+    class Meta:
+        ordering = ['-created_at']
     
     def __str__(self):
         return f"Result for {self.task}"
