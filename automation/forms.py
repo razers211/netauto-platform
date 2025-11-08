@@ -803,6 +803,45 @@ class ExternalConnectivityForm(forms.Form):
     )
 
 
+class AEForm(forms.Form):
+    ae_name = forms.CharField(max_length=20, widget=forms.TextInput(attrs={'class': 'form-control', 'placeholder': 'ae0'}), help_text='AE interface name (e.g., ae0)')
+    lacp = forms.BooleanField(initial=True, required=False, widget=forms.CheckboxInput(attrs={'class': 'form-check-input'}), help_text='Enable LACP')
+    members = forms.CharField(required=False, widget=forms.Textarea(attrs={'class': 'form-control', 'rows': 3, 'placeholder': 'ge-0/0/0\nge-0/0/1'}), help_text='Member interfaces (one per line)')
+    unit = forms.IntegerField(min_value=0, widget=forms.NumberInput(attrs={'class': 'form-control', 'placeholder': '0'}), help_text='Unit number')
+    ip_address = forms.GenericIPAddressField(required=False, widget=forms.TextInput(attrs={'class': 'form-control', 'placeholder': '10.1.1.1'}), help_text='IP address (optional)')
+    prefix_length = forms.IntegerField(min_value=1, max_value=128, initial=24, widget=forms.NumberInput(attrs={'class': 'form-control'}), help_text='IP prefix length')
+    description = forms.CharField(max_length=255, required=False, widget=forms.TextInput(attrs={'class': 'form-control'}), help_text='Description (optional)')
+
+class L2VPWSForm(forms.Form):
+    service_name = forms.CharField(max_length=100, widget=forms.TextInput(attrs={'class': 'form-control', 'placeholder': 'VPWS_100'}), help_text='VPWS instance name')
+    local_if = forms.CharField(max_length=50, widget=forms.TextInput(attrs={'class': 'form-control'}), help_text='Local interface')
+    remote_ip = forms.GenericIPAddressField(widget=forms.TextInput(attrs={'class': 'form-control'}), help_text='Remote PE IP')
+    vc_id = forms.IntegerField(min_value=1, widget=forms.NumberInput(attrs={'class': 'form-control', 'placeholder': '100'}), help_text='VC ID (must match on both PEs)')
+    description = forms.CharField(max_length=255, required=False, widget=forms.Textarea(attrs={'class': 'form-control', 'rows': 2, 'placeholder': 'Customer 100'}), help_text='Optional description')
+
+class L2VPNSVCForm(forms.Form):
+    service_name = forms.CharField(max_length=100, widget=forms.TextInput(attrs={'class': 'form-control', 'placeholder': 'VPLS_200'}), help_text='VPLS instance name')
+    vpls_id = forms.IntegerField(min_value=10, max_value=16777214, widget=forms.NumberInput(attrs={'class': 'form-control', 'placeholder': '200'}), help_text='VPLS ID (VLAN ID 10–16777214)')
+    rd = forms.CharField(max_length=21, required=False, widget=forms.TextInput(attrs={'class': 'form-control', 'placeholder': '65100:200'}), help_text='Route distinguisher')
+    rt_both = forms.CharField(max_length=21, required=False, widget=forms.TextInput(attrs={'class': 'form-control', 'placeholder': '65100:200'}), help_text='Import/Export target (same value)')
+    description = forms.CharField(max_length=255, required=False, widget=forms.TextInput(attrs={'class': 'form-control'}), help_text='Optional description')
+
+class EVPNInstanceForm(forms.Form):
+    instance_name = forms.CharField(max_length=50, widget=forms.TextInput(attrs={'class': 'form-control', 'placeholder': 'EVPN_VPLS_200'}), help_text='EVPN instance name')
+    vpls_id = forms.IntegerField(min_value=10, max_value=16777214, widget=forms.NumberInput(attrs={'class': 'form-control', 'placeholder': '200'}), help_text='VPLS ID')
+    rd = forms.CharField(max_length=21, required=False, widget=forms.TextInput(attrs={'class': 'form-control', 'placeholder': '65100:200'}), help_text='Route distinguisher')
+    rt_target = forms.IntegerField(min_value=1, max_value=4294967295, widget=forms.NumberInput(attrs={'class': 'form-control', 'placeholder': '65100'}), help_text='Route target ASN')
+    rt_id = forms.IntegerField(min_value=1, max_value=65535, widget=forms.NumberInput(attrs={'class': 'form-control', 'placeholder': '200'}), help_text='Route target ID')
+    encapsulation = forms.ChoiceField(choices=[('mpls', 'MPLS')], initial='mpls', widget=forms.Select(attrs={'class': 'form-control'}), help_text='Encapsulation type')
+    replication_type = forms.ChoiceField(choices=[('ingress', 'Ingress'), ('egress', 'Egress')], initial='ingress', widget=forms.Select(attrs={'class': 'form-control'}), help_text='Replication type')
+    description = forms.CharField(max_length=255, required=False, widget=forms.TextInput(attrs={'class': 'form-control'}), help_text='Optional description')
+
+class BridgeDomainForm(forms.Form):
+    bd_name = forms.CharField(max_length=50, widget=forms.TextInput(attrs={'class': 'form-control', 'placeholder': 'BD_Customer_100'}), help_text='Bridge domain name')
+    vlan_id = forms.IntegerField(min_value=10, max_value=16777214, widget=forms.NumberInput(attrs={'class': 'form-control', 'placeholder': '100'}), help_text='VLAN ID (10–16777214)')
+    interface = forms.ChoiceField(required=False, widget=forms.Select(attrs={'class': 'form-control interface-select'}), help_text='Interface to assign to BD (optional)')
+    description = forms.CharField(max_length=255, required=False, widget=forms.TextInput(attrs={'class': 'form-control'}), help_text='Optional description')
+
 class MultiTenantDeploymentForm(forms.Form):
     fabric_name = forms.CharField(
         max_length=50,

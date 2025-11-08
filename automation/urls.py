@@ -1,5 +1,6 @@
 from django.urls import path
 from . import views
+from . import evpn_l2vpn_views
 
 urlpatterns = [
     # Health check
@@ -27,6 +28,7 @@ urlpatterns = [
     # Interface operations
     path('automation/interface/', views.interface_config, name='interface_config'),
     path('automation/interface/vlan/', views.vlan_interface_config, name='vlan_interface_config'),
+    path('automation/interface/ae/', views.ae_config, name='ae_config'),
     
     # Routing operations
     path('automation/routing/static/', views.routing_static, name='routing_static'),
@@ -67,6 +69,12 @@ urlpatterns = [
     path('automation/datacenter/external-connectivity/', views.external_connectivity, name='external_connectivity'),
     path('automation/datacenter/multi-tenant/', views.multi_tenant_deployment, name='multi_tenant_deployment'),
     path('automation/datacenter/fabric/deploy-all/', views.full_fabric_deploy, name='full_fabric_deploy'),
+    
+    # EVPN/L2VPN operations
+    path('automation/l2vpn/l2vpws/', evpn_l2vpn_views.l2vpws, name='l2vpws'),
+    path('automation/l2vpn/vpls/', evpn_l2vpn_views.l2vpn_vpls, name='l2vpn_vpls'),
+    path('automation/evpn/instance/', evpn_l2vpn_views.evpn_instance, name='evpn_instance_config'),
+    path('automation/evpn/bridge-domain/', evpn_l2vpn_views.bridge_domain, name='bridge_domain_config'),
     
     # API endpoints
     path('api/tasks/<int:task_id>/status/', views.api_task_status, name='api_task_status'),

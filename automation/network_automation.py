@@ -1,5 +1,5 @@
 """
-Network automation scripts using Netmiko for Cisco and Huawei devices.
+Network automation scripts using Netmiko for Cisco and Huawei devices; PyEZ for Juniper.
 """
 
 import time
@@ -8,6 +8,15 @@ from netmiko import ConnectHandler, NetmikoTimeoutException, NetmikoAuthenticati
 from typing import Dict, List, Optional, Tuple
 import re
 from functools import wraps
+try:
+    from .juniper_manager import JuniperDeviceManager
+except ImportError:
+    JuniperDeviceManager = None
+
+try:
+    from .evpn_l2vpn import EVPNManager
+except ImportError:
+    EVPNManager = None
 
 logger = logging.getLogger(__name__)
 
@@ -38,8 +47,8 @@ class NetworkAutomationError(Exception):
 
 class NetworkDeviceManager:
     """
-    Manager class for network device operations using Netmiko.
-    Supports both Cisco and Huawei devices.
+    Manager class for network device operations using Netmiko or PyEZ.
+    Supports Cisco, Huawei, and Juniper devices.
     """
     
     def __init__(self, device_params: Dict):
@@ -47,6 +56,11 @@ class NetworkDeviceManager:
         self.connection = None
         self.device_type = device_params.get('device_type', '')
         
+        # Select backend driver
+        if self.device_type and ('juniper' in self.device_type) and JuniperDeviceManager:
+            self.driver = JuniperDeviceManager(device_params)
+        else:
+            self.driver = None
         # Enhance connection parameters for better reliability
         self._enhance_connection_params()
     
@@ -92,6 +106,9 @@ class NetworkDeviceManager:
     @performance_monitor("Device Connection")
     def connect(self) -> bool:
         """Establish connection to network device with optimized setup"""
+        if self.driver:
+            return self.driver.connect()
+        # Original Netmiko path
         try:
             logger.debug(f"Connecting to {self.device_params['host']}...")
             
@@ -131,12 +148,17 @@ class NetworkDeviceManager:
     
     def disconnect(self):
         """Close connection to network device."""
-        if self.connection:
+        if self.driver:
+            self.driver.disconnect()
+        elif self.connection:
             self.connection.disconnect()
             logger.info(f"Disconnected from {self.device_params['host']}")
     
     def execute_command(self, command: str, use_textfsm: bool = False) -> str:
         """Execute command with optimized performance settings"""
+        if self.driver:
+            return self.driver.execute_command(command)
+        # Original Netmiko path
         if not self.connection:
             raise NetworkAutomationError("Not connected to device")
         
@@ -252,6 +274,9 @@ class NetworkDeviceManager:
     
     def execute_config_commands(self, commands: List[str]) -> str:
         """Execute configuration commands on the device with connection recovery."""
+        if self.driver:
+            return self.driver.execute_config_commands(commands)
+        # Original Netmiko path
         if not self.connection:
             raise NetworkAutomationError("Not connected to device")
         
@@ -508,6 +533,9 @@ class NetworkDeviceManager:
     
     def debug_connection_state(self) -> dict:
         """Debug method to check connection and prompt state"""
+        if self.driver:
+            return {'driver': 'Juniper', 'connected': bool(self.driver.juniper_dev.dev), 'host': self.device_params.get('host', 'unknown')}
+        # Original Netmiko path
         debug_info = {}
         
         try:
@@ -1184,6 +1212,34 @@ class RoutingManager:
         else:
             raise NetworkAutomationError(f"Unsupported device type: {self.device_type}")
 
+
+class AEManager:
+    """Aggregated Ethernet (AE) management for Juniper."""
+    
+    def __init__(self, device_manager: NetworkDeviceManager):
+        self.device = device_manager
+        self.device_type = device_manager.device_params['device_type']
+    
+    def create_ae(self, ae_name, members=None, lacp=True):
+        if 'juniper' not in self.device_type:
+            raise NetworkAutomationError(f"Unsupported device type: {self.device_type}")
+        with self.device as dev:
+            if dev.driver:
+                commands = [f'set interfaces {ae_name} aggregated-ether-options lacp active'] if lacp else [f'set interfaces {ae_name}']
+                if members:
+                    for m in members:
+                        commands.append(f'set interfaces {m} ether-options gigabit-options redundant-parent {ae_name}')
+                return dev.driver.execute_config_commands(commands)
+        
+    def configure_ae_unit(self, ae_name, unit, ip_address, prefix_length, description=None):
+        if 'juniper' not in self.device_type:
+            raise NetworkAutomationError(f"Unsupported device type: {self.device_type}")
+        with self.device as dev:
+            if dev.driver:
+                commands = [f'set interfaces {ae_name} unit {unit} family inet address {ip_address}/{prefix_length}']
+                if description:
+                    commands.append(f'set interfaces {ae_name} unit {unit} description "{description}"')
+                return dev.driver.execute_config_commands(commands)
 
 class DeviceInfoManager:
     """Device information and monitoring operations."""
@@ -3168,6 +3224,77 @@ def execute_network_task(device_params: Dict, task_type: str, parameters: Dict) 
                 )
             
             # Datacenter Fabric tasks
+            elif task_type == 'ae_config':
+                manager = AEManager(device)
+                result = manager.create_ae(
+                    parameters['ae_name'],
+                    parameters.get('members', []),
+                    parameters.get('lacp', True)
+                )
+                if parameters.get('ip_address') and parameters.get('prefix_length'):
+                    result += ' ' + manager.configure_ae_unit(
+                        parameters['ae_name'],
+                        parameters['unit'],
+                        parameters['ip_address'],
+                        parameters['prefix_length'],
+                        parameters.get('description')
+                    )
+            
+            # EVPN/L2VPN task handlers
+            elif task_type == 'l2vpws':
+                if EVPNManager:
+                    manager = EVPNManager(device)
+                    result = manager.configure_l2vpws(
+                        parameters['service_name'],
+                        parameters['local_if'],
+                        parameters['remote_ip'],
+                        parameters['vc_id'],
+                        parameters.get('description')
+                    )
+                else:
+                    raise NetworkAutomationError("EVPNManager not available")
+            
+            elif task_type == 'l2vpn_vpls':
+                if EVPNManager:
+                    manager = EVPNManager(device)
+                    result = manager.configure_l2vpn_vpls(
+                        parameters['service_name'],
+                        parameters['vpls_id'],
+                        parameters.get('rd'),
+                        parameters.get('rt_both'),
+                        parameters.get('description')
+                    )
+                else:
+                    raise NetworkAutomationError("EVPNManager not available")
+            
+            elif task_type == 'evpn_instance':
+                if EVPNManager:
+                    manager = EVPNManager(device)
+                    result = manager.configure_evpn_instance(
+                        parameters['instance_name'],
+                        parameters['vpls_id'],
+                        parameters.get('rd'),
+                        parameters.get('route_target'),
+                        parameters.get('route_target_id'),
+                        parameters.get('encapsulation', 'mpls'),
+                        parameters.get('replication_type', 'ingress'),
+                        parameters.get('description')
+                    )
+                else:
+                    raise NetworkAutomationError("EVPNManager not available")
+            
+            elif task_type == 'bridge_domain':
+                if EVPNManager:
+                    manager = EVPNManager(device)
+                    result = manager.configure_bridge_domain(
+                        parameters['bd_name'],
+                        parameters['instance_name'],
+                        parameters['vlan_id'],
+                        parameters.get('interface'),
+                        parameters.get('description')
+                    )
+                else:
+                    raise NetworkAutomationError("EVPNManager not available")
             elif task_type == 'datacenter_fabric':
                 manager = DataCenterFabricManager(device)
                 # Pass parameters directly as fabric_config

@@ -9,6 +9,7 @@ from django.db import transaction
 import json
 import threading
 from .models import Device, NetworkTask, TaskResult
+from .evpn_l2vpn import EVPNManager
 from .forms import (
     DeviceForm, VLANCreateForm, VLANDeleteForm, InterfaceConfigForm,
     StaticRouteForm, OSPFConfigForm, DeviceTestForm,
@@ -17,7 +18,7 @@ from .forms import (
     OSPFAreaForm, OSPFAuthenticationForm, EVPNInstanceForm, BGPEVPNForm, VXLANTunnelForm,
     NVEInterfaceForm, VXLANGatewayForm, VXLANAccessPortForm, DataCenterFabricForm,
     TenantNetworkForm, ExternalConnectivityForm, MultiTenantDeploymentForm, FullFabricDeploymentForm,
-    DeviceSelectionForm, ShowRoutesForm
+    DeviceSelectionForm, ShowRoutesForm, AEForm, L2VPWSForm, L2VPNSVCForm, BridgeDomainForm
 )
 from .network_automation import execute_network_task
 
@@ -1640,6 +1641,54 @@ def multi_tenant_deployment(request):
 
 
 @login_required
+def ae_config(request):
+    """Configure Aggregated Ethernet (AE) interface on selected device"""
+    if request.method == 'POST':
+        form = AEForm(request.POST)
+        device_form = DeviceSelectionForm(request.POST)
+        
+        if form.is_valid() and device_form.is_valid():
+            device = device_form.cleaned_data['device']
+            
+            # Process members (one per line)
+            members_text = form.cleaned_data.get('members', '')
+            members = [m.strip() for m in members_text.split('\n') if m.strip()]
+            
+            # Create network task
+            task = NetworkTask.objects.create(
+                device=device,
+                task_type='ae_config',
+                parameters={
+                    'ae_name': form.cleaned_data['ae_name'],
+                    'lacp': form.cleaned_data['lacp'],
+                    'members': members,
+                    'unit': form.cleaned_data['unit'],
+                    'ip_address': form.cleaned_data.get('ip_address'),
+                    'prefix_length': form.cleaned_data.get('prefix_length'),
+                    'description': form.cleaned_data.get('description')
+                },
+                created_by=request.user
+            )
+            
+            # Execute task asynchronously
+            thread = threading.Thread(target=execute_task_async, args=(task,))
+            thread.start()
+            
+            messages.success(request, f'AE configuration task submitted for {device.name}')
+            return redirect('task_detail', task_id=task.id)
+    else:
+        form = AEForm()
+        device_form = DeviceSelectionForm()
+    
+    context = {
+        'form': form,
+        'device_form': device_form,
+        'title': 'Configure Aggregated Ethernet (AE)',
+    }
+    return render(request, 'automation/ae_form.html', context)
+
+
+@login_required
 def full_fabric_deploy(request):
     """Deploy the entire datacenter fabric at once across all selected devices.
     Pre-fills devices list with all active devices and allows per-device AS numbers.
@@ -1910,7 +1959,7 @@ def parse_interfaces_from_output(output, device_type):
                         if interface_name not in interfaces:
                             interfaces.append(interface_name)
         
-        elif device_type == 'juniper':
+        elif device_type in ['juniper_mx', 'juniper_srx']:
             # Juniper interface parsing
             for line in lines:
                 line = line.strip()
@@ -1950,7 +1999,7 @@ def parse_vrfs_from_output(output, device_type):
             vrfs = parse_huawei_vrfs(lines, logger)
         elif device_type in ['cisco_ios', 'cisco_xe']:
             vrfs = parse_cisco_vrfs(lines, logger)
-        elif device_type == 'juniper':
+        elif device_type in ['juniper_mx', 'juniper_srx']:
             vrfs = parse_juniper_vrfs(lines, logger)
         else:
             logger.warning(f"Unsupported device type for VRF parsing: {device_type}")

@@ -5,12 +5,14 @@ import json
 
 
 class Device(models.Model):
-    DEVICE_TYPES = [
+DEVICE_TYPES = [
         ('cisco_ios', 'Cisco IOS'),
         ('cisco_xe', 'Cisco IOS-XE'),
         ('cisco_nxos', 'Cisco NX-OS'),
         ('huawei', 'Huawei VRP'),
         ('huawei_vrpv8', 'Huawei VRP v8'),
+        ('juniper_mx', 'Juniper MX'),
+        ('juniper_srx', 'Juniper SRX'),
     ]
     
     name = models.CharField(max_length=100, unique=True)
@@ -73,6 +75,11 @@ class NetworkTask(models.Model):
         ('show_vrf', 'Show VRFs'),
         ('show_bgp', 'Show BGP Summary'),
         ('backup_config', 'Backup Configuration'),
+        ('ae_config', 'Configure AE Interface'),
+        ('l2vpws', 'L2VPWS Instance'),
+        ('l2vpn_vpls', 'L2VPN VPLS Instance'),
+        ('bgp_evpn', 'BGP EVPN'),
+        ('evpn_instance', 'EVPN Instance'),
     ]
     
     STATUS_CHOICES = [
