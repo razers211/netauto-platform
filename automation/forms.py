@@ -101,6 +101,40 @@ class InterfaceConfigForm(forms.Form):
         
         return cleaned_data
 
+class InterfaceIPv6Form(forms.Form):
+    interface = forms.ChoiceField(
+        choices=[],
+        label="Interface",
+        widget=forms.Select(attrs={'class': 'form-control interface-select'}),
+        help_text='Select an interface from the device'
+    )
+    ipv6_address = forms.CharField(
+        max_length=64,
+        label='IPv6 Address',
+        widget=forms.TextInput(attrs={'placeholder': '2001:db8::1'})
+    )
+    prefix_length = forms.IntegerField(
+        min_value=1,
+        max_value=128,
+        label='Prefix Length',
+        initial=64
+    )
+
+class VLANInterfaceIPv6Form(forms.Form):
+    vlan_id = forms.IntegerField(min_value=1, max_value=4094, widget=forms.NumberInput(attrs={'class': 'form-control', 'placeholder': '100'}), label='VLAN ID')
+    ipv6_address = forms.CharField(max_length=64, widget=forms.TextInput(attrs={'class': 'form-control', 'placeholder': '2001:db8::1'}), label='IPv6 Address')
+    prefix_length = forms.IntegerField(min_value=1, max_value=128, initial=64, widget=forms.NumberInput(attrs={'class': 'form-control'}), label='Prefix Length')
+    vrf_name = forms.ChoiceField(choices=[('', 'Global (no VRF)')], required=False, widget=forms.Select(attrs={'class': 'form-control vrf-select'}), label='VRF Name')
+    description = forms.CharField(max_length=255, required=False, widget=forms.TextInput(attrs={'class': 'form-control'}), label='Description (optional)')
+    enable_interface = forms.BooleanField(required=False, initial=True, widget=forms.CheckboxInput(attrs={'class': 'form-check-input'}), label='Enable interface')
+
+class StaticRouteV6Form(forms.Form):
+    ACTION_CHOICES = [('add', 'Add Route'), ('remove', 'Remove Route')]
+    action = forms.ChoiceField(choices=ACTION_CHOICES, label='Action')
+    prefix = forms.CharField(max_length=64, widget=forms.TextInput(attrs={'class': 'form-control', 'placeholder': '2001:db8:1::/64'}), label='IPv6 Prefix')
+    next_hop = forms.CharField(max_length=64, widget=forms.TextInput(attrs={'class': 'form-control', 'placeholder': '2001:db8::2'}), label='Next Hop')
+    vrf_name = forms.ChoiceField(choices=[('', 'Global (no VRF)')], required=False, widget=forms.Select(attrs={'class': 'form-control vrf-select'}), label='VRF Name')
+
 
 class StaticRouteForm(forms.Form):
     ACTION_CHOICES = [
@@ -175,6 +209,30 @@ class OSPFConfigForm(forms.Form):
             return networks
         except json.JSONDecodeError:
             raise forms.ValidationError("Invalid JSON format.")
+
+class OSPFv3ConfigForm(forms.Form):
+    process_id = forms.IntegerField(min_value=1, max_value=65535, label='Process ID', widget=forms.NumberInput(attrs={'placeholder': '1'}))
+    router_id = forms.GenericIPAddressField(label='Router ID', widget=forms.TextInput(attrs={'placeholder': '1.1.1.1'}))
+    interfaces = forms.CharField(
+        widget=forms.Textarea(attrs={
+            'rows': 4,
+            'placeholder': 'Interfaces JSON (e.g.)\n[{"interface": "GigabitEthernet0/0", "area": "0"}]'
+        }),
+        label='Interfaces (JSON)'
+    )
+    
+    def clean_interfaces(self):
+        data = self.cleaned_data['interfaces']
+        try:
+            items = json.loads(data)
+            if not isinstance(items, list):
+                raise forms.ValidationError('Interfaces must be a JSON array')
+            for it in items:
+                if not all(k in it for k in ['interface', 'area']):
+                    raise forms.ValidationError("Each item must have 'interface' and 'area'")
+            return items
+        except json.JSONDecodeError:
+            raise forms.ValidationError('Invalid JSON format')
 
 
 class TaskExecutionForm(forms.Form):
@@ -811,6 +869,34 @@ class AEForm(forms.Form):
     ip_address = forms.GenericIPAddressField(required=False, widget=forms.TextInput(attrs={'class': 'form-control', 'placeholder': '10.1.1.1'}), help_text='IP address (optional)')
     prefix_length = forms.IntegerField(min_value=1, max_value=128, initial=24, widget=forms.NumberInput(attrs={'class': 'form-control'}), help_text='IP prefix length')
     description = forms.CharField(max_length=255, required=False, widget=forms.TextInput(attrs={'class': 'form-control'}), help_text='Description (optional)')
+
+class HuaweiEthTrunkForm(forms.Form):
+    trunk_id = forms.IntegerField(min_value=1, max_value=4096, widget=forms.NumberInput(attrs={'class': 'form-control', 'placeholder': '1'}), help_text='Eth-Trunk ID (e.g., 1)')
+    mode = forms.ChoiceField(choices=[('lacp', 'LACP (dynamic)'), ('lacp-static', 'LACP Static')], initial='lacp', widget=forms.Select(attrs={'class': 'form-control'}), help_text='Aggregation mode')
+    mlag_id = forms.IntegerField(required=False, min_value=1, max_value=65535, widget=forms.NumberInput(attrs={'class': 'form-control', 'placeholder': '1'}), help_text='M-LAG domain ID (optional)')
+    allowed_vlans = forms.CharField(max_length=200, required=False, widget=forms.TextInput(attrs={'class': 'form-control', 'placeholder': '1-10,20,30-40'}), help_text='Allowed VLANs for trunk (optional)')
+    members = forms.CharField(required=True, widget=forms.Textarea(attrs={'class': 'form-control', 'rows': 3, 'placeholder': 'GE1/0/1\nGE1/0/2'}), help_text='Member interfaces (one per line)')
+    description = forms.CharField(max_length=255, required=False, widget=forms.TextInput(attrs={'class': 'form-control'}), help_text='Description (optional)')
+
+class HuaweiEthTrunkMLAGForm(forms.Form):
+    primary_device = forms.ModelChoiceField(queryset=Device.objects.filter(is_active=True), label='Primary Switch')
+    peer_device = forms.ModelChoiceField(queryset=Device.objects.filter(is_active=True), label='Peer Switch')
+    trunk_id = forms.IntegerField(min_value=1, max_value=4096, widget=forms.NumberInput(attrs={'class': 'form-control', 'placeholder': '1'}), help_text='Eth-Trunk ID (e.g., 1)')
+    mode = forms.ChoiceField(choices=[('lacp', 'LACP (dynamic)'), ('lacp-static', 'LACP Static')], initial='lacp', widget=forms.Select(attrs={'class': 'form-control'}), help_text='Aggregation mode')
+    mlag_id = forms.IntegerField(required=False, min_value=1, max_value=65535, widget=forms.NumberInput(attrs={'class': 'form-control', 'placeholder': '1'}), help_text='M-LAG domain ID (optional)')
+    allowed_vlans = forms.CharField(max_length=200, required=False, widget=forms.TextInput(attrs={'class': 'form-control', 'placeholder': '1-10,20,30-40'}), help_text='Allowed VLANs for trunk (optional)')
+    members_primary = forms.CharField(required=True, widget=forms.Textarea(attrs={'class': 'form-control', 'rows': 3, 'placeholder': 'GE1/0/1\nGE1/0/2'}), label='Primary members', help_text='Member interfaces on primary (one per line)')
+    members_peer = forms.CharField(required=True, widget=forms.Textarea(attrs={'class': 'form-control', 'rows': 3, 'placeholder': 'GE2/0/1\nGE2/0/2'}), label='Peer members', help_text='Member interfaces on peer (one per line)')
+    description = forms.CharField(max_length=255, required=False, widget=forms.TextInput(attrs={'class': 'form-control'}), help_text='Description (optional)')
+
+    def clean(self):
+        cleaned = super().clean()
+        p = cleaned.get('primary_device')
+        q = cleaned.get('peer_device')
+        if p and q and p.id == q.id:
+            raise forms.ValidationError('Primary and Peer switches must be different devices.')
+        # Optionally enforce Huawei types
+        return cleaned
 
 class L2VPWSForm(forms.Form):
     service_name = forms.CharField(max_length=100, widget=forms.TextInput(attrs={'class': 'form-control', 'placeholder': 'VPWS_100'}), help_text='VPWS instance name')

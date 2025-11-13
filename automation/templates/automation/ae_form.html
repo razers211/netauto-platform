@@ -1,0 +1,25 @@
+{% extends 'automation/base.html' %}
+
+{% block content %}
+<h2>{{ title }}</h2>
+
+<div class="card mb-4">
+  <div class="card-body">
+    <form method="post">
+      {% csrf_token %}
+      <div class="row">
+        <div class="col-md-6">
+          {{ device_form }}
+        </div>
+        <div class="col-md-6">
+          {{ form }}
+        </div>
+      </div>
+      <div class="mt-3">
+        <button type="submit" class="btn btn-primary">Configure AE</button>
+        <a href="{% url 'device_list' %}" class="btn btn-secondary">Cancel</a>
+      </div>
+    </form>
+  </div>
+</div>
+{% endblock %}

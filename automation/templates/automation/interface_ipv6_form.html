@@ -1,0 +1,33 @@
+{% extends 'automation/base.html' %}
+{% block title %}IPv6 Interface{% endblock %}
+{% block content %}
+<div class="row">
+  <div class="col-12 col-lg-8 offset-lg-2">
+    <div class="card">
+      <div class="card-header">Configure IPv6 on Interface</div>
+      <div class="card-body">
+        <form method="post">
+          {% csrf_token %}
+          <div class="row g-3 mb-3">
+            <div class="col-md-6">
+              <label class="form-label">Device</label>
+              {{ device_form.device }}
+            </div>
+            <div class="col-md-6">
+              <label class="form-label">Interface</label>
+              {{ form.interface }}
+            </div>
+          </div>
+          <div class="row g-3 mb-3">
+            <div class="col-md-8">{{ form.ipv6_address.label_tag }} {{ form.ipv6_address }}</div>
+            <div class="col-md-4">{{ form.prefix_length.label_tag }} {{ form.prefix_length }}</div>
+          </div>
+          <div class="d-flex justify-content-end">
+            <button class="btn btn-primary" type="submit">Apply</button>
+          </div>
+        </form>
+      </div>
+    </div>
+  </div>
+</div>
+{% endblock %}

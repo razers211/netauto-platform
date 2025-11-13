@@ -1,0 +1,37 @@
+{% extends 'automation/base.html' %}
+{% block title %}OSPFv3 (IPv6){% endblock %}
+{% block content %}
+<div class="row">
+  <div class="col-12 col-lg-8 offset-lg-2">
+    <div class="card">
+      <div class="card-header">Configure OSPFv3 (IPv6)</div>
+      <div class="card-body">
+        <form method="post">
+          {% csrf_token %}
+          <div class="row g-3 mb-3">
+            <div class="col-md-6">
+              <label class="form-label">Device</label>
+              {{ device_form.device }}
+            </div>
+            <div class="col-md-3">
+              {{ form.process_id.label_tag }}
+              {{ form.process_id }}
+            </div>
+            <div class="col-md-3">
+              {{ form.router_id.label_tag }}
+              {{ form.router_id }}
+            </div>
+          </div>
+          <div class="mb-3">
+            {{ form.interfaces.label_tag }}
+            {{ form.interfaces }}
+          </div>
+          <div class="d-flex justify-content-end">
+            <button class="btn btn-primary" type="submit">Apply</button>
+          </div>
+        </form>
+      </div>
+    </div>
+  </div>
+</div>
+{% endblock %}

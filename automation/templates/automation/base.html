@@ -53,9 +53,12 @@
                             <i class="bi bi-ethernet"></i> Interface
                         </a>
                         <ul class="dropdown-menu">
-                            <li><a class="dropdown-item" href="{% url 'interface_config' %}">Configure Physical Interface</a></li>
-                            <li><a class="dropdown-item" href="{% url 'vlan_interface_config' %}">Configure VLAN Interface</a></li>
+                            <li><a class="dropdown-item" href="{% url 'interface_config' %}">Configure Physical Interface (IPv4)</a></li>
+                            <li><a class="dropdown-item" href="{% url 'interface_ipv6_config' %}">Configure Interface (IPv6)</a></li>
+                            <li><a class="dropdown-item" href="{% url 'vlan_interface_config' %}">Configure VLAN Interface (IPv4)</a></li>
+                            <li><a class="dropdown-item" href="{% url 'vlan_interface_ipv6_config' %}">Configure VLAN Interface (IPv6)</a></li>
                             <li><a class="dropdown-item" href="{% url 'ae_config' %}">Configure Aggregated Ethernet (AE)</a></li>
+                            <li><a class="dropdown-item" href="{% url 'huawei_eth_trunk_mlag' %}">Huawei Eth-Trunk (M-LAG)</a></li>
                         </ul>
                     </li>
                     <li class="nav-item dropdown">
@@ -63,8 +66,10 @@
                             <i class="bi bi-signpost"></i> Routing
                         </a>
                         <ul class="dropdown-menu">
-                            <li><a class="dropdown-item" href="{% url 'routing_static' %}">Static Route</a></li>
-                            <li><a class="dropdown-item" href="{% url 'routing_ospf' %}">OSPF Config</a></li>
+                            <li><a class="dropdown-item" href="{% url 'routing_static' %}">Static Route (IPv4)</a></li>
+                            <li><a class="dropdown-item" href="{% url 'routing_static_v6' %}">Static Route (IPv6)</a></li>
+                            <li><a class="dropdown-item" href="{% url 'routing_ospf' %}">OSPF (IPv4)</a></li>
+                            <li><a class="dropdown-item" href="{% url 'routing_ospf_v6' %}">OSPFv3 (IPv6)</a></li>
                         </ul>
                     </li>
                     <li class="nav-item dropdown">
@@ -82,8 +87,10 @@
                         </a>
                         <ul class="dropdown-menu">
                             <li><h6 class="dropdown-header">BGP Configuration</h6></li>
-                            <li><a class="dropdown-item" href="{% url 'bgp_neighbor' %}">Configure Neighbor</a></li>
-                            <li><a class="dropdown-item" href="{% url 'bgp_network' %}">Advertise Network</a></li>
+                            <li><a class="dropdown-item" href="{% url 'bgp_neighbor' %}">Configure Neighbor (IPv4)</a></li>
+                            <li><a class="dropdown-item" href="{% url 'bgp_neighbor_v6' %}">Configure Neighbor (IPv6)</a></li>
+                            <li><a class="dropdown-item" href="{% url 'bgp_network' %}">Advertise Network (IPv4)</a></li>
+                            <li><a class="dropdown-item" href="{% url 'bgp_network_v6' %}">Advertise Network (IPv6)</a></li>
                             <li><a class="dropdown-item" href="{% url 'bgp_vrf_config' %}">VRF Configuration</a></li>
                             <li><hr class="dropdown-divider"></li>
                             <li><h6 class="dropdown-header">EVPN/L2VPN</h6></li>

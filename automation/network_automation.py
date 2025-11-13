@@ -994,7 +994,7 @@ class InterfaceManager:
         return self.device.execute_config_commands(commands)
     
     def configure_ip_address(self, interface: str, ip_address: str, subnet_mask: str) -> str:
-        """Configure IP address on interface."""
+        """Configure IPv4 address on interface."""
         if 'cisco' in self.device_type:
             commands = [
                 f"interface {interface}",
@@ -1013,6 +1013,26 @@ class InterfaceManager:
         else:
             raise NetworkAutomationError(f"Unsupported device type: {self.device_type}")
         
+        return self.device.execute_config_commands(commands)
+    
+    def configure_ipv6_address(self, interface: str, ipv6_address: str, prefix_length: int) -> str:
+        """Configure IPv6 address on interface."""
+        if 'cisco' in self.device_type:
+            commands = [
+                f"interface {interface}",
+                f"ipv6 address {ipv6_address}/{prefix_length}",
+                "no shutdown"
+            ]
+        elif 'huawei' in self.device_type:
+            commands = [
+                f"interface {interface}",
+                "ipv6 enable",
+                f"ipv6 address {ipv6_address} {prefix_length}",
+                "undo shutdown",
+                "quit"
+            ]
+        else:
+            raise NetworkAutomationError(f"Unsupported device type: {self.device_type}")
         return self.device.execute_config_commands(commands)
     
     def _mask_to_prefix(self, mask: str) -> int:
@@ -1050,6 +1070,34 @@ class InterfaceManager:
             commands.append("shutdown")
         
         return self.device.execute_config_commands(commands)
+    
+    def configure_vlan_interface_ipv6(self, vlan_id: int, ipv6_address: str, prefix_length: int, 
+                                    vrf_name: str = None, description: str = None, enable: bool = True) -> str:
+        """Configure VLAN interface IPv6 on Cisco/Huawei."""
+        if 'cisco' in self.device_type:
+            commands = [f"interface vlan {vlan_id}"]
+            if description:
+                commands.append(f"description {description}")
+            if vrf_name:
+                commands.append(f"ip vrf forwarding {vrf_name}")
+            commands.append(f"ipv6 address {ipv6_address}/{prefix_length}")
+            commands.append("no shutdown" if enable else "shutdown")
+            return self.device.execute_config_commands(commands)
+        elif 'huawei' in self.device_type:
+            commands = [f"interface Vlanif{vlan_id}"]
+            if description:
+                commands.append(f"description {description}")
+            if vrf_name:
+                commands.append(f"ipv6 binding vpn-instance {vrf_name}")
+            commands.extend([
+                "ipv6 enable",
+                f"ipv6 address {ipv6_address} {prefix_length}"
+            ])
+            commands.append("undo shutdown" if enable else "shutdown")
+            commands.append("quit")
+            return self.device.execute_config_commands(commands)
+        else:
+            raise NetworkAutomationError(f"Unsupported device type: {self.device_type}")
     
     def _huawei_vlan_interface(self, vlan_id: int, ip_address: str, subnet_mask: str, 
                              vrf_name: str = None, description: str = None, enable: bool = True) -> str:
@@ -1111,6 +1159,22 @@ class RoutingManager:
         
         return self.device.execute_config_commands(commands)
     
+    def add_static_route_v6(self, prefix: str, next_hop: str, vrf_name: str = None) -> str:
+        """Add IPv6 static route."""
+        if 'cisco' in self.device_type:
+            if vrf_name:
+                commands = [f"ipv6 route vrf {vrf_name} {prefix} {next_hop}"]
+            else:
+                commands = [f"ipv6 route {prefix} {next_hop}"]
+        elif 'huawei' in self.device_type:
+            if vrf_name:
+                commands = [f"ipv6 route-static vpn-instance {vrf_name} {prefix} {next_hop}"]
+            else:
+                commands = [f"ipv6 route-static {prefix} {next_hop}"]
+        else:
+            raise NetworkAutomationError(f"Unsupported device type: {self.device_type}")
+        return self.device.execute_config_commands(commands)
+    
     def remove_static_route(self, network: str, mask: str, next_hop: str, vrf_name: str = None) -> str:
         """Remove static route."""
         if 'cisco' in self.device_type:
@@ -1127,6 +1191,22 @@ class RoutingManager:
         else:
             raise NetworkAutomationError(f"Unsupported device type: {self.device_type}")
         
+        return self.device.execute_config_commands(commands)
+    
+    def remove_static_route_v6(self, prefix: str, next_hop: str, vrf_name: str = None) -> str:
+        """Remove IPv6 static route."""
+        if 'cisco' in self.device_type:
+            if vrf_name:
+                commands = [f"no ipv6 route vrf {vrf_name} {prefix} {next_hop}"]
+            else:
+                commands = [f"no ipv6 route {prefix} {next_hop}"]
+        elif 'huawei' in self.device_type:
+            if vrf_name:
+                commands = [f"undo ipv6 route-static vpn-instance {vrf_name} {prefix} {next_hop}"]
+            else:
+                commands = [f"undo ipv6 route-static {prefix} {next_hop}"]
+        else:
+            raise NetworkAutomationError(f"Unsupported device type: {self.device_type}")
         return self.device.execute_config_commands(commands)
     
     def configure_ospf(self, process_id: int, router_id: str, networks: List[Dict], vrf_name: str = None) -> str:
@@ -1505,6 +1585,63 @@ class BGPManager:
             ]
         
         return self.device.execute_config_commands(commands)
+    
+    def configure_bgp_neighbor_v6(self, as_number: int, neighbor_ip: str, remote_as: int, vrf_name: str = None, description: str = None, source_interface: str = None) -> str:
+        """Configure BGP IPv6 neighbor."""
+        if 'cisco' in self.device_type:
+            commands = [f"router bgp {as_number}"]
+            if not vrf_name:
+                commands.append(f"neighbor {neighbor_ip} remote-as {remote_as}")
+                if description:
+                    commands.append(f"neighbor {neighbor_ip} description {description}")
+            commands.append(f"address-family ipv6{' vrf ' + vrf_name if vrf_name else ''}")
+            commands.append(f"neighbor {neighbor_ip} remote-as {remote_as}")
+            if description:
+                commands.append(f"neighbor {neighbor_ip} description {description}")
+            commands.append(f"neighbor {neighbor_ip} activate")
+            commands.append("exit-address-family")
+            return self.device.execute_config_commands(commands)
+        elif 'huawei' in self.device_type:
+            commands = [f"bgp {as_number}"]
+            if vrf_name:
+                commands.append(f"ipv6-family vpn-instance {vrf_name}")
+            else:
+                commands.append("ipv6-family")
+            commands.append(f"peer {neighbor_ip} as-number {remote_as}")
+            if description:
+                commands.append(f"peer {neighbor_ip} description {description}")
+            commands.extend(["quit", "quit"])
+            return self.device.execute_config_commands(commands)
+        else:
+            raise NetworkAutomationError(f"Unsupported device type: {self.device_type}")
+    
+    def advertise_network_v6(self, as_number: int, prefix: str, vrf_name: str = None) -> str:
+        """Advertise IPv6 network in BGP."""
+        if 'cisco' in self.device_type:
+            commands = [
+                f"router bgp {as_number}",
+                f"address-family ipv6{' vrf ' + vrf_name if vrf_name else ''}",
+                f"network {prefix}",
+                "exit-address-family"
+            ]
+            return self.device.execute_config_commands(commands)
+        elif 'huawei' in self.device_type:
+            commands = [f"bgp {as_number}"]
+            if vrf_name:
+                commands.append(f"ipv6-family vpn-instance {vrf_name}")
+            else:
+                commands.append("ipv6-family")
+            # Huawei expects prefix and length split; allow CIDR and pass as-is when possible
+            # Typical syntax: network 2001:db8:: 64
+            if '/' in prefix:
+                net, plen = prefix.split('/')
+                commands.append(f"network {net} {int(plen)}")
+            else:
+                commands.append(f"network {prefix}")
+            commands.extend(["quit", "quit"])
+            return self.device.execute_config_commands(commands)
+        else:
+            raise NetworkAutomationError(f"Unsupported device type: {self.device_type}")
     
     def _mask_to_prefix(self, mask: str) -> int:
         """Convert subnet mask to prefix length."""
@@ -1889,6 +2026,40 @@ class AdvancedOSPFManager:
             raise NetworkAutomationError(f"Unsupported device type: {self.device_type}")
         
         return self.device.execute_config_commands(commands)
+    
+    def configure_ospf_v6(self, process_id: int, router_id: str, interfaces: List[Dict]) -> str:
+        """Configure OSPFv3 (IPv6). interfaces: [{"interface": "GE1/0/1", "area": "0"}]"""
+        if 'cisco' in self.device_type:
+            commands = [
+                "ipv6 unicast-routing",
+                f"ipv6 router ospf {process_id}",
+                f"router-id {router_id}",
+                "exit"
+            ]
+            for itf in interfaces:
+                commands.extend([
+                    f"interface {itf['interface']}",
+                    f"ipv6 ospf {process_id} area {itf['area']}",
+                    "no shutdown"
+                ])
+            return self.device.execute_config_commands(commands)
+        elif 'huawei' in self.device_type:
+            commands = [
+                f"ospfv3 {process_id}",
+                f"router-id {router_id}",
+                "quit"
+            ]
+            for itf in interfaces:
+                commands.extend([
+                    f"interface {itf['interface']}",
+                    "ipv6 enable",
+                    f"ospfv3 {process_id} area {itf['area']}",
+                    "undo shutdown",
+                    "quit"
+                ])
+            return self.device.execute_config_commands(commands)
+        else:
+            raise NetworkAutomationError(f"Unsupported device type: {self.device_type}")
     
     def configure_ospf_virtual_link(self, process_id: int, area_id: str, neighbor_id: str, 
                                   hello_interval: int = 10, dead_interval: int = 40) -> str:
@@ -2942,6 +3113,14 @@ def execute_network_task(device_params: Dict, task_type: str, parameters: Dict) 
                 else:
                     raise NetworkAutomationError(f"Unknown interface mode: {parameters['mode']}")
             
+            elif task_type == 'interface_ipv6':
+                manager = InterfaceManager(device)
+                result = manager.configure_ipv6_address(
+                    parameters['interface'],
+                    parameters['ipv6_address'],
+                    parameters['prefix_length']
+                )
+            
             elif task_type == 'vlan_interface_config':
                 manager = InterfaceManager(device)
                 result = manager.configure_vlan_interface(
@@ -2970,6 +3149,17 @@ def execute_network_task(device_params: Dict, task_type: str, parameters: Dict) 
                         parameters.get('vrf_name')
                     )
             
+            elif task_type == 'vlan_interface_ipv6':
+                manager = InterfaceManager(device)
+                result = manager.configure_vlan_interface_ipv6(
+                    parameters['vlan_id'],
+                    parameters['ipv6_address'],
+                    parameters['prefix_length'],
+                    parameters.get('vrf_name'),
+                    parameters.get('description'),
+                    parameters.get('enable_interface', True)
+                )
+            
             elif task_type == 'routing_ospf':
                 manager = RoutingManager(device)
                 result = manager.configure_ospf(
@@ -2977,6 +3167,48 @@ def execute_network_task(device_params: Dict, task_type: str, parameters: Dict) 
                     parameters['router_id'],
                     parameters['networks'],
                     parameters.get('vrf_name')
+                    )
+            
+            elif task_type == 'routing_static_v6':
+                manager = RoutingManager(device)
+                if parameters.get('action') == 'remove':
+                    result = manager.remove_static_route_v6(
+                        parameters['prefix'],
+                        parameters['next_hop'],
+                        parameters.get('vrf_name')
+                    )
+                else:
+                    result = manager.add_static_route_v6(
+                        parameters['prefix'],
+                        parameters['next_hop'],
+                        parameters.get('vrf_name')
+                )
+            
+            elif task_type == 'bgp_neighbor_v6':
+                manager = BGPManager(device)
+                result = manager.configure_bgp_neighbor_v6(
+                    parameters['as_number'],
+                    parameters['neighbor_ip'],
+                    parameters['remote_as'],
+                    parameters.get('vrf_name'),
+                    parameters.get('description'),
+                    parameters.get('source_interface')
+                )
+            
+            elif task_type == 'bgp_network_v6':
+                manager = BGPManager(device)
+                result = manager.advertise_network_v6(
+                    parameters['as_number'],
+                    parameters['prefix'],
+                    parameters.get('vrf_name')
+                )
+            
+            elif task_type == 'routing_ospf_v6':
+                manager = OSPFManager(device)
+                result = manager.configure_ospf_v6(
+                    parameters['process_id'],
+                    parameters['router_id'],
+                    parameters['interfaces']
                 )
             
             elif task_type == 'show_version':

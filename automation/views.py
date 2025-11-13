@@ -18,7 +18,8 @@ from .forms import (
     OSPFAreaForm, OSPFAuthenticationForm, EVPNInstanceForm, BGPEVPNForm, VXLANTunnelForm,
     NVEInterfaceForm, VXLANGatewayForm, VXLANAccessPortForm, DataCenterFabricForm,
     TenantNetworkForm, ExternalConnectivityForm, MultiTenantDeploymentForm, FullFabricDeploymentForm,
-    DeviceSelectionForm, ShowRoutesForm, AEForm, L2VPWSForm, L2VPNSVCForm, BridgeDomainForm
+    DeviceSelectionForm, ShowRoutesForm, AEForm, L2VPWSForm, L2VPNSVCForm, BridgeDomainForm,
+    HuaweiEthTrunkMLAGForm, InterfaceIPv6Form, VLANInterfaceIPv6Form, StaticRouteV6Form, OSPFv3ConfigForm
 )
 from .network_automation import execute_network_task
 
@@ -1540,6 +1541,78 @@ def tenant_network(request):
 
 
 @login_required
+def bgp_neighbor_v6(request):
+    if request.method == 'POST':
+        form = BGPNeighborForm(request.POST)
+        device_form = DeviceSelectionForm(request.POST)
+        if form.is_valid() and device_form.is_valid():
+            device = device_form.cleaned_data['device']
+            task = NetworkTask.objects.create(
+                device=device,
+                task_type='bgp_neighbor_v6',
+                parameters={
+                    'as_number': form.cleaned_data['as_number'],
+                    'neighbor_ip': form.cleaned_data['neighbor_ip'],
+                    'remote_as': form.cleaned_data['remote_as'],
+                    'vrf_name': form.cleaned_data.get('vrf_name', ''),
+                    'description': form.cleaned_data.get('description', '')
+                },
+                created_by=request.user
+            )
+            thread = threading.Thread(target=execute_task_async, args=(task,))
+            thread.start()
+            messages.success(request, f'BGP IPv6 neighbor task submitted for {device.name}')
+            return redirect('task_detail', task_id=task.id)
+    else:
+        form = BGPNeighborForm()
+        device_form = DeviceSelectionForm()
+    return render(request, 'automation/bgp_neighbor_form.html', {'form': form, 'device_form': device_form, 'title': 'Configure BGP Neighbor (IPv6)'})
+
+
+@login_required
+def bgp_network_v6(request):
+    if request.method == 'POST':
+        form = BGPNetworkForm(request.POST)
+        device_form = DeviceSelectionForm(request.POST)
+        if form.is_valid() and device_form.is_valid():
+            device = device_form.cleaned_data['device']
+            # Build IPv6 prefix robustly
+            net = form.cleaned_data['network']
+            mask = form.cleaned_data['mask']
+            if '/' in net:
+                prefix = net
+            elif ':' in net and str(mask).isdigit():
+                prefix = f"{net}/{int(mask)}"
+            else:
+                # Fallback: assume IPv4-like and compute prefix length
+                try:
+                    m = mask
+                    parts = [int(p) for p in m.split('.')]
+                    bits = sum(bin(p).count('1') for p in parts)
+                    prefix = f"{net}/{bits}"
+                except Exception:
+                    prefix = net
+            task = NetworkTask.objects.create(
+                device=device,
+                task_type='bgp_network_v6',
+                parameters={
+                    'as_number': form.cleaned_data['as_number'],
+                    'prefix': prefix,
+                    'vrf_name': form.cleaned_data.get('vrf_name', '')
+                },
+                created_by=request.user
+            )
+            thread = threading.Thread(target=execute_task_async, args=(task,))
+            thread.start()
+            messages.success(request, f'BGP IPv6 network task submitted for {device.name}')
+            return redirect('task_detail', task_id=task.id)
+    else:
+        form = BGPNetworkForm()
+        device_form = DeviceSelectionForm()
+    return render(request, 'automation/bgp_network_form.html', {'form': form, 'device_form': device_form, 'title': 'Advertise BGP Network (IPv6)'})
+
+
+@login_required
 def external_connectivity(request):
     """Configure External Connectivity on selected device"""
     if request.method == 'POST':
@@ -1638,6 +1711,172 @@ def multi_tenant_deployment(request):
         'title': 'Deploy Multi-Tenant Configuration'
     }
     return render(request, 'automation/multi_tenant_deployment_form.html', context)
+
+
+@login_required
+def huawei_eth_trunk_mlag(request):
+    """Configure Huawei Eth-Trunk with M-LAG on two switches concurrently"""
+    if request.method == 'POST':
+        form = HuaweiEthTrunkMLAGForm(request.POST)
+        if form.is_valid():
+            p = form.cleaned_data['primary_device']
+            q = form.cleaned_data['peer_device']
+            trunk_id = form.cleaned_data['trunk_id']
+            mode = form.cleaned_data.get('mode', 'lacp')
+            mlag_id = form.cleaned_data.get('mlag_id')
+            allowed_vlans = form.cleaned_data.get('allowed_vlans')
+            desc = form.cleaned_data.get('description')
+            members_p = [m.strip() for m in form.cleaned_data['members_primary'].split('\n') if m.strip()]
+            members_q = [m.strip() for m in form.cleaned_data['members_peer'].split('\n') if m.strip()]
+
+            task_p = NetworkTask.objects.create(
+                device=p,
+                task_type='huawei_eth_trunk',
+                parameters={
+                    'trunk_id': trunk_id,
+                    'mode': mode,
+                    'mlag_id': mlag_id,
+                    'allowed_vlans': allowed_vlans,
+                    'members': members_p,
+                    'description': desc,
+                },
+                created_by=request.user
+            )
+            task_q = NetworkTask.objects.create(
+                device=q,
+                task_type='huawei_eth_trunk',
+                parameters={
+                    'trunk_id': trunk_id,
+                    'mode': mode,
+                    'mlag_id': mlag_id,
+                    'allowed_vlans': allowed_vlans,
+                    'members': members_q,
+                    'description': desc,
+                },
+                created_by=request.user
+            )
+
+            t1 = threading.Thread(target=execute_task_async, args=(task_p,))
+            t2 = threading.Thread(target=execute_task_async, args=(task_q,))
+            t1.start(); t2.start()
+
+            messages.success(request, f'Eth-Trunk{trunk_id} MLAG tasks submitted for {p.name} and {q.name}')
+            return redirect('task_detail', task_id=task_p.id)
+    else:
+        form = HuaweiEthTrunkMLAGForm()
+    return render(request, 'automation/huawei_eth_trunk_mlag_form.html', {'form': form, 'title': 'Huawei Eth-Trunk (M-LAG)'} )
+
+
+@login_required
+def interface_ipv6_config(request):
+    if request.method == 'POST':
+        form = InterfaceIPv6Form(request.POST)
+        device_form = DeviceSelectionForm(request.POST)
+        if form.is_valid() and device_form.is_valid():
+            device = device_form.cleaned_data['device']
+            task = NetworkTask.objects.create(
+                device=device,
+                task_type='interface_ipv6',
+                parameters={
+                    'interface': form.cleaned_data['interface'],
+                    'ipv6_address': form.cleaned_data['ipv6_address'],
+                    'prefix_length': form.cleaned_data['prefix_length']
+                },
+                created_by=request.user
+            )
+            thread = threading.Thread(target=execute_task_async, args=(task,))
+            thread.start()
+            messages.success(request, f'IPv6 interface configuration task submitted for {device.name}')
+            return redirect('task_detail', task_id=task.id)
+    else:
+        form = InterfaceIPv6Form()
+        device_form = DeviceSelectionForm()
+    return render(request, 'automation/interface_ipv6_form.html', {'form': form, 'device_form': device_form, 'title': 'Configure IPv6 on Interface'})
+
+
+@login_required
+def vlan_interface_ipv6_config(request):
+    if request.method == 'POST':
+        form = VLANInterfaceIPv6Form(request.POST)
+        device_form = DeviceSelectionForm(request.POST)
+        if form.is_valid() and device_form.is_valid():
+            device = device_form.cleaned_data['device']
+            task = NetworkTask.objects.create(
+                device=device,
+                task_type='vlan_interface_ipv6',
+                parameters={
+                    'vlan_id': form.cleaned_data['vlan_id'],
+                    'ipv6_address': form.cleaned_data['ipv6_address'],
+                    'prefix_length': form.cleaned_data['prefix_length'],
+                    'vrf_name': form.cleaned_data.get('vrf_name'),
+                    'description': form.cleaned_data.get('description'),
+                    'enable_interface': form.cleaned_data.get('enable_interface', True)
+                },
+                created_by=request.user
+            )
+            thread = threading.Thread(target=execute_task_async, args=(task,))
+            thread.start()
+            messages.success(request, f'IPv6 VLAN interface configuration task submitted for {device.name}')
+            return redirect('task_detail', task_id=task.id)
+    else:
+        form = VLANInterfaceIPv6Form()
+        device_form = DeviceSelectionForm()
+    return render(request, 'automation/vlan_interface_ipv6_form.html', {'form': form, 'device_form': device_form, 'title': 'Configure IPv6 on VLAN Interface'})
+
+
+@login_required
+def routing_static_v6(request):
+    if request.method == 'POST':
+        form = StaticRouteV6Form(request.POST)
+        device_form = DeviceSelectionForm(request.POST)
+        if form.is_valid() and device_form.is_valid():
+            device = device_form.cleaned_data['device']
+            task = NetworkTask.objects.create(
+                device=device,
+                task_type='routing_static_v6',
+                parameters={
+                    'action': form.cleaned_data['action'],
+                    'prefix': form.cleaned_data['prefix'],
+                    'next_hop': form.cleaned_data['next_hop'],
+                    'vrf_name': form.cleaned_data.get('vrf_name')
+                },
+                created_by=request.user
+            )
+            thread = threading.Thread(target=execute_task_async, args=(task,))
+            thread.start()
+            messages.success(request, f'IPv6 static route task submitted for {device.name}')
+            return redirect('task_detail', task_id=task.id)
+    else:
+        form = StaticRouteV6Form()
+        device_form = DeviceSelectionForm()
+    return render(request, 'automation/routing_static_v6_form.html', {'form': form, 'device_form': device_form, 'title': 'Static Route (IPv6)'})
+
+
+@login_required
+def routing_ospf_v6(request):
+    if request.method == 'POST':
+        form = OSPFv3ConfigForm(request.POST)
+        device_form = DeviceSelectionForm(request.POST)
+        if form.is_valid() and device_form.is_valid():
+            device = device_form.cleaned_data['device']
+            task = NetworkTask.objects.create(
+                device=device,
+                task_type='routing_ospf_v6',
+                parameters={
+                    'process_id': form.cleaned_data['process_id'],
+                    'router_id': form.cleaned_data['router_id'],
+                    'interfaces': form.cleaned_data['interfaces']
+                },
+                created_by=request.user
+            )
+            thread = threading.Thread(target=execute_task_async, args=(task,))
+            thread.start()
+            messages.success(request, f'OSPFv3 configuration task submitted for {device.name}')
+            return redirect('task_detail', task_id=task.id)
+    else:
+        form = OSPFv3ConfigForm()
+        device_form = DeviceSelectionForm()
+    return render(request, 'automation/ospf_v6_form.html', {'form': form, 'device_form': device_form, 'title': 'Configure OSPFv3 (IPv6)'})
 
 
 @login_required

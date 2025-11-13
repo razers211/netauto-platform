@@ -27,11 +27,15 @@ urlpatterns = [
     
     # Interface operations
     path('automation/interface/', views.interface_config, name='interface_config'),
+    path('automation/interface/ipv6/', views.interface_ipv6_config, name='interface_ipv6_config'),
     path('automation/interface/vlan/', views.vlan_interface_config, name='vlan_interface_config'),
+    path('automation/interface/vlan/ipv6/', views.vlan_interface_ipv6_config, name='vlan_interface_ipv6_config'),
     path('automation/interface/ae/', views.ae_config, name='ae_config'),
+    path('automation/huawei/eth-trunk/mlag/', views.huawei_eth_trunk_mlag, name='huawei_eth_trunk_mlag'),
     
     # Routing operations
     path('automation/routing/static/', views.routing_static, name='routing_static'),
+    path('automation/routing/static6/', views.routing_static_v6, name='routing_static_v6'),
     path('automation/routing/ospf/', views.routing_ospf, name='routing_ospf'),
     
     # Show commands
@@ -43,7 +47,9 @@ urlpatterns = [
     
     # BGP operations
     path('automation/bgp/neighbor/', views.bgp_neighbor, name='bgp_neighbor'),
+    path('automation/bgp/neighbor6/', views.bgp_neighbor_v6, name='bgp_neighbor_v6'),
     path('automation/bgp/network/', views.bgp_network, name='bgp_network'),
+    path('automation/bgp/network6/', views.bgp_network_v6, name='bgp_network_v6'),
     path('automation/bgp/vrf-config/', views.bgp_vrf_config, name='bgp_vrf_config'),
     
     # Advanced BGP operations
@@ -55,6 +61,7 @@ urlpatterns = [
     # Advanced OSPF operations
     path('automation/ospf/area/', views.ospf_area, name='ospf_area'),
     path('automation/ospf/authentication/', views.ospf_authentication, name='ospf_authentication'),
+    path('automation/ospf/v6/', views.routing_ospf_v6, name='routing_ospf_v6'),
     
     # EVPN VXLAN operations
     path('automation/evpn/instance/', views.evpn_instance, name='evpn_instance'),

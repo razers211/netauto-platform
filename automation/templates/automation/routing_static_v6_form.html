@@ -1,0 +1,34 @@
+{% extends 'automation/base.html' %}
+{% block title %}IPv6 Static Route{% endblock %}
+{% block content %}
+<div class="row">
+  <div class="col-12 col-lg-8 offset-lg-2">
+    <div class="card">
+      <div class="card-header">Configure IPv6 Static Route</div>
+      <div class="card-body">
+        <form method="post">
+          {% csrf_token %}
+          <div class="row g-3 mb-3">
+            <div class="col-md-6">
+              <label class="form-label">Device</label>
+              {{ device_form.device }}
+            </div>
+            <div class="col-md-6">
+              <label class="form-label">Action</label>
+              {{ form.action }}
+            </div>
+          </div>
+          <div class="row g-3 mb-3">
+            <div class="col-md-6">{{ form.prefix.label_tag }} {{ form.prefix }}</div>
+            <div class="col-md-6">{{ form.next_hop.label_tag }} {{ form.next_hop }}</div>
+          </div>
+          <div class="mb-3">{{ form.vrf_name.label_tag }} {{ form.vrf_name }}</div>
+          <div class="d-flex justify-content-end">
+            <button class="btn btn-primary" type="submit">Apply</button>
+          </div>
+        </form>
+      </div>
+    </div>
+  </div>
+</div>
+{% endblock %}

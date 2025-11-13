@@ -1,0 +1,81 @@
+{% extends 'automation/base.html' %}
+{% load static %}
+
+{% block title %}Huawei Eth-Trunk (M-LAG){% endblock %}
+
+{% block content %}
+<div class="row">
+  <div class="col-12 col-lg-8 offset-lg-2">
+    <div class="card">
+      <div class="card-header">
+        <i class="bi bi-link-45deg"></i> Huawei Eth-Trunk (M-LAG)
+      </div>
+      <div class="card-body">
+        <form method="post">
+          {% csrf_token %}
+
+          <div class="row g-3 mb-3">
+            <div class="col-md-6">
+              <label class="form-label">Primary Switch</label>
+              {{ form.primary_device }}
+            </div>
+            <div class="col-md-6">
+              <label class="form-label">Peer Switch</label>
+              {{ form.peer_device }}
+            </div>
+          </div>
+
+          <div class="row g-3 mb-3">
+            <div class="col-md-4">
+              <label class="form-label">Eth-Trunk ID</label>
+              {{ form.trunk_id }}
+            </div>
+            <div class="col-md-4">
+              <label class="form-label">Mode</label>
+              {{ form.mode }}
+            </div>
+            <div class="col-md-4">
+              <label class="form-label">M-LAG ID (optional)</label>
+              {{ form.mlag_id }}
+            </div>
+          </div>
+
+          <div class="mb-3">
+            <label class="form-label">Allowed VLANs (optional)</label>
+            {{ form.allowed_vlans }}
+            <div class="form-text">Example: 10,20,30-40</div>
+          </div>
+
+          <div class="row g-3 mb-3">
+            <div class="col-md-6">
+              <label class="form-label">Primary members</label>
+              {{ form.members_primary }}
+            </div>
+            <div class="col-md-6">
+              <label class="form-label">Peer members</label>
+              {{ form.members_peer }}
+            </div>
+          </div>
+
+          <div class="mb-3">
+            <label class="form-label">Description (optional)</label>
+            {{ form.description }}
+          </div>
+
+          {% if form.errors %}
+          <div class="alert alert-danger">
+            {{ form.errors }}
+          </div>
+          {% endif %}
+
+          <div class="d-flex justify-content-end">
+            <button type="submit" class="btn btn-primary">
+              <i class="bi bi-play-fill"></i> Create Eth-Trunk on both switches
+            </button>
+          </div>
+        </form>
+      </div>
+    </div>
+  </div>
+</div>
+{% endblock %}

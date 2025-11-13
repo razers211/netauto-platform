@@ -79,6 +79,13 @@ class NetworkTask(models.Model):
         ('l2vpws', 'L2VPWS Instance'),
         ('l2vpn_vpls', 'L2VPN VPLS Instance'),
         ('bridge_domain', 'Bridge Domain Configuration'),
+        ('huawei_eth_trunk', 'Huawei Eth-Trunk (M-LAG)'),
+        ('interface_ipv6', 'Configure Interface IPv6'),
+        ('vlan_interface_ipv6', 'Configure VLAN Interface IPv6'),
+        ('routing_static_v6', 'Static Route IPv6'),
+        ('bgp_neighbor_v6', 'Configure BGP Neighbor (IPv6)'),
+        ('bgp_network_v6', 'Advertise BGP Network (IPv6)'),
+        ('routing_ospf_v6', 'OSPFv3 (IPv6) Configuration'),
     ]
     
     STATUS_CHOICES = [

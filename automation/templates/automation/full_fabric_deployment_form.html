@@ -1,0 +1,84 @@
+{% extends 'automation/base.html' %}
+{% load static %}
+
+{% block title %}{{ title }} - Network Automation{% endblock %}
+
+{% block content %}
+<div class="container-fluid">
+  <div class="row">
+    <div class="col-md-10 mx-auto">
+      <div class="card">
+        <div class="card-header">
+          <h4 class="card-title mb-0">
+            <i class="fas fa-network-wired"></i> {{ title }}
+          </h4>
+        </div>
+        <div class="card-body">
+          <form method="post">
+            {% csrf_token %}
+
+            <div class="mb-4">
+              <h5 class="text-muted">Global Settings</h5>
+              <div class="row">
+                <div class="col-md-6">
+                  <div class="form-group">
+                    <label for="{{ form.fabric_name.id_for_label }}" class="form-label">Fabric Name</label>
+                    {{ form.fabric_name }}
+                  </div>
+                </div>
+                <div class="col-md-6">
+                  <div class="form-group">
+                    <label for="{{ form.underlay_ip_range.id_for_label }}" class="form-label">Underlay IP Range</label>
+                    {{ form.underlay_ip_range }}
+                  </div>
+                </div>
+              </div>
+              <div class="form-check mt-2">
+                {{ form.skip_validation }}
+                <label class="form-check-label" for="{{ form.skip_validation.id_for_label }}">Skip pre-check validation</label>
+              </div>
+            </div>
+
+            <hr>
+
+            <div class="mb-4">
+              <h5 class="text-muted">Devices (per-device role, ID, AS number, and uplinks)</h5>
+              <small class="form-text text-muted">Pre-filled with all active devices. Adjust roles, device IDs, AS numbers, and uplink interfaces as needed.</small>
+              {{ form.devices_json }}
+              {% if form.devices_json.errors %}
+              <div class="invalid-feedback d-block">{{ form.devices_json.errors.0 }}</div>
+              {% endif %}
+            </div>
+
+            <div class="mb-4">
+              <h5 class="text-muted">Link Mapping (optional, for exact interface pairing)</h5>
+              <small class="form-text text-muted">Specify spine↔leaf links explicitly to ensure matching /30 endpoints.</small>
+              {{ form.links_json }}
+              {% if form.links_json.errors %}
+              <div class="invalid-feedback d-block">{{ form.links_json.errors.0 }}</div>
+              {% endif %}
+            </div>
+
+            <div class="mb-4">
+              <h5 class="text-muted">Tenant Networks (optional)</h5>
+              {{ form.tenant_networks_json }}
+              {% if form.tenant_networks_json.errors %}
+              <div class="invalid-feedback d-block">{{ form.tenant_networks_json.errors.0 }}</div>
+              {% endif %}
+            </div>
+
+            <div class="form-actions">
+              <button type="submit" class="btn btn-primary">
+                <i class="fas fa-play"></i> Deploy Whole Fabric
+              </button>
+              <a href="{% url 'index' %}" class="btn btn-secondary">
+                <i class="fas fa-times"></i> Cancel
+              </a>
+            </div>
+          </form>
+        </div>
+      </div>
+    </div>
+  </div>
+</div>
+{% endblock %}
