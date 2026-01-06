@@ -2952,12 +2952,12 @@ class DataCenterFabricManager:
             "quit",
             
             # Create VBDIF for gateway
-            f"interface Vbdif{vlan_id}",
-            f"ip address {gateway_ip} {prefix_length}",
-            f"bridge-domain {vlan_id}",
-            "arp broadcast-suppress enable",
-            "undo shutdown",
-            "quit"
+         #   f"interface Vbdif{vlan_id}",
+         #   f"ip address {gateway_ip} {prefix_length}",
+         #   f"bridge-domain {vlan_id}",
+         #   "arp broadcast-suppress enable",
+         #   "undo shutdown",
+          #  "quit"
         ]
         
         # Configure access interfaces if provided
