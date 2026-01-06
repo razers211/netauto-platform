@@ -2768,7 +2768,6 @@ class DataCenterFabricManager:
                     f"peer {spine_ip} as-number {remote_as}",
                     f"peer {spine_ip} connect-interface LoopBack0",
                     f"peer {spine_ip} ebgp-max-hop 2",
-                    f"peer {spine_ip} group spine-leaf-evpn",
                     "l2vpn-family evpn",
                     f"peer {spine_ip} enable",
                     f"peer {spine_ip} advertise-community",
@@ -2792,7 +2791,6 @@ class DataCenterFabricManager:
                     f"peer {spine_ip} as-number {remote_as}",
                     f"peer {spine_ip} connect-interface LoopBack0",
                     f"peer {spine_ip} ebgp-max-hop 2",
-                    f"peer {spine_ip} group spine-leaf-evpn",
                     f"l2vpn-family evpn",
                     f"peer {spine_ip} enable",
                     f"peer {spine_ip} advertise-community",
@@ -2830,13 +2828,13 @@ class DataCenterFabricManager:
             "quit",
             
             # Create VLAN
-            f"vlan {vlan_id}",
-            f"description {tenant_name}_VLAN",
-            "quit",
+            #f"vlan {vlan_id}",
+            #f"description {tenant_name}_VLAN",
+           # "quit",
             
             # Configure NVE interface (assuming NVE1 exists)
             "interface Nve1",
-            f"vni {vni} head-end peer-list bgp",
+            f"vni {vni} head-end peer-list protocol bgp",
             "quit",
             
             # Create VBDIF for gateway
