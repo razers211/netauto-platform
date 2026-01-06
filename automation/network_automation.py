@@ -2865,6 +2865,133 @@ class DataCenterFabricManager:
         
         return self.device.execute_config_commands(commands)
     
+    def deploy_multi_tenant_configuration(self, fabric_name: str, tenant_networks: list) -> str:
+        """Deploy multiple tenant networks with EVPN VXLAN configuration."""
+        commands = []
+        results = []
+        
+        # Add fabric description
+        commands.extend([
+            f"# Multi-Tenant Deployment for Fabric: {fabric_name}",
+            f"# Deploying {len(tenant_networks)} tenant networks"
+        ])
+        
+        # Process each tenant network
+        for tenant in tenant_networks:
+            tenant_name = tenant.get('name')
+            vni = tenant.get('vni')
+            vlan_id = tenant.get('vlan_id')
+            gateway_ip = tenant.get('gateway_ip')
+            subnet_mask = tenant.get('subnet_mask')
+            access_interfaces = tenant.get('access_interfaces', [])
+            route_target = tenant.get('route_target', f"65000:{vni}")
+            advertise_external = tenant.get('advertise_external', False)
+            
+            if not all([tenant_name, vni, vlan_id, gateway_ip, subnet_mask]):
+                error_msg = f"Missing required parameters for tenant {tenant_name}"
+                results.append(f"ERROR: {error_msg}")
+                continue
+            
+            # Generate commands for this tenant
+            tenant_commands = self._generate_tenant_commands(
+                tenant_name, vni, vlan_id, gateway_ip, 
+                subnet_mask, access_interfaces, route_target
+            )
+            
+            commands.extend(tenant_commands)
+            results.append(f"✓ Configured tenant: {tenant_name} (VNI: {vni}, VLAN: {vlan_id})")
+            
+            # Configure external advertisement if requested
+            if advertise_external:
+                ext_commands = self._generate_external_advertisement_commands(
+                    tenant_name, vni, route_target
+                )
+                commands.extend(ext_commands)
+                results.append(f"✓ Configured external advertisement for: {tenant_name}")
+        
+        # Execute all commands in one batch for efficiency
+        try:
+            output = self.device.execute_config_commands(commands)
+            results.append(f"\n=== Configuration Summary ===")
+            results.append(f"Fabric: {fabric_name}")
+            results.append(f"Total Tenants: {len(tenant_networks)}")
+            results.append(f"Commands Executed: {len(commands)}")
+            return "\n".join(results) + f"\n\n=== Device Output ===\n{output}"
+            
+        except Exception as e:
+            error_msg = f"Failed to deploy multi-tenant configuration: {str(e)}"
+            results.append(f"ERROR: {error_msg}")
+            return "\n".join(results)
+    
+    def _generate_tenant_commands(self, tenant_name: str, vni: int, vlan_id: int,
+                                 gateway_ip: str, subnet_mask: str, 
+                                 access_interfaces: list = None, 
+                                 route_target: str = None) -> list:
+        """Generate configuration commands for a single tenant network."""
+        prefix_length = self._mask_to_prefix(subnet_mask)
+        
+        commands = [
+            f"# Tenant: {tenant_name} Configuration",
+            
+            # Create bridge domain
+            f"bridge-domain {vlan_id}",
+            f"vxlan vni {vni}",
+            "arp broadcast-suppress enable",
+            "evpn",
+            f"route-distinguisher auto",
+            f"vpn-target {route_target} export-extcommunity",
+            f"vpn-target {route_target} import-extcommunity",
+            "quit",
+            
+            # Create VLAN
+           # f"vlan {vlan_id}",
+           # f"description {tenant_name}_VLAN",
+           # "quit",
+            
+            # Configure NVE interface
+            "interface Nve1",
+            f"vni {vni} head-end peer-list bgp",
+            "quit",
+            
+            # Create VBDIF for gateway
+            f"interface Vbdif{vlan_id}",
+            f"ip address {gateway_ip} {prefix_length}",
+            f"bridge-domain {vlan_id}",
+            "arp broadcast-suppress enable",
+            "undo shutdown",
+            "quit"
+        ]
+        
+        # Configure access interfaces if provided
+        if access_interfaces:
+            for interface in access_interfaces:
+                commands.extend([
+                    f"interface {interface}",
+                    "portswitch",
+                    "port link-type trunk",
+                    "quit",
+                    f"interface {interface}.{vlan_id} mode l2",
+                    f"encapsulation dot1q {vlan_id}",
+                    f"bridge-domain {vlan_id}",
+                    "undo shutdown",
+                    "quit"
+                ])
+        
+        return commands
+    
+    def _generate_external_advertisement_commands(self, tenant_name: str, vni: int, route_target: str) -> list:
+        """Generate commands for external advertisement of tenant networks."""
+        commands = [
+            f"# External Advertisement for {tenant_name}",
+            "bgp 65000",
+            "l2vpn-family evpn",
+            f"vpn-target {route_target} export-extcommunity",
+            f"vpn-target {route_target} import-extcommunity",
+            "quit",
+            "quit"
+        ]
+        return commands
+    
     def configure_external_connectivity(self, border_leaf_config: dict) -> str:
         """Configure external connectivity for tenant networks (DCI/WAN)."""
         commands = []
@@ -3571,6 +3698,13 @@ def execute_network_task(device_params: Dict, task_type: str, parameters: Dict) 
             elif task_type == 'device_diagnostics':
                 manager = DataCenterFabricManager(device)
                 result = manager.diagnose_device_connectivity()
+            
+            elif task_type == 'multi_tenant_deployment':
+                manager = DataCenterFabricManager(device)
+                result = manager.deploy_multi_tenant_configuration(
+                    parameters['fabric_name'],
+                    parameters['tenant_networks']
+                )
             
             else:
                 raise NetworkAutomationError(f"Unknown task type: {task_type}")
