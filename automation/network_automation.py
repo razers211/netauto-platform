@@ -2600,14 +2600,22 @@ class DataCenterFabricManager:
         except Exception:
             pass
         
+        commands.extend([
+            "interface LoopBack0",
+            f"ip address {router_id} 255.255.255.255",
+            "quit"
+        ])
         # Configure base BGP on spine
         commands.extend([
             f"bgp {as_number}",
             f"router-id {router_id}",
         ])
         
+           # Configure loopback address (no shutdown command on LoopBack)
+        
         # If links provided, create external group and add peers to it
         if underlay_links:
+            peer_as = link.get('peer_as') or as_number
             commands.extend([
                 "group spine-leaf-evpn external"
             ])
@@ -2615,23 +2623,31 @@ class DataCenterFabricManager:
                 peer_ip = link.get('peer_loopback_ip') or f"10.255.254.{link.get('peer_device_id', 1)}"
                 peer_as = link.get('peer_as') or as_number
                 commands.extend([
+                    "undo default ipv4-unicast",
                     f"peer {peer_ip} as-number {peer_as}",
                     f"peer {peer_ip} connect-interface LoopBack0",
                     f"peer {peer_ip} ebgp-max-hop 2",
                     f"peer {peer_ip} group spine-leaf-evpn",
+                    "l2vpn-family evpn",
+                    f"peer {peer_ip} enable",
+                    f"peer {peer_ip} advertise-community",
+                    f"peer {peer_ip} reflect-client",
+                    "quit",
+                    f"bgp {as_number}"
                 ])
             # EVPN settings for the group
-            commands.extend([
-                "l2vpn-family evpn",
-                "peer spine-leaf-evpn enable",
-                "peer spine-leaf-evpn advertise-community",
-                "peer spine-leaf-evpn reflect-client",
-                "quit",
-                "quit"
-            ])
+          ##     "l2vpn-family evpn",
+            #    "peer spine-leaf-evpn enable",
+            #   "peer spine-leaf-evpn advertise-community",
+             #   "peer spine-leaf-evpn reflect-client",
+              #  "quit",
+               # "quit"
+            #])
         else:
             # No links provided: just exit BGP view cleanly
             commands.extend(["quit"])
+        
+      
         
         # Configure spine interfaces with IP addressing and enable
         if underlay_links:
@@ -2657,12 +2673,7 @@ class DataCenterFabricManager:
                     "quit"
                 ])
         
-        # Configure loopback address (no shutdown command on LoopBack)
-        commands.extend([
-            "interface LoopBack0",
-            f"ip address {router_id} 255.255.255.255",
-            "quit"
-        ])
+       
         
         # Execute all commands in a single batch to preserve context
         return self.device.execute_config_commands(commands)
@@ -2753,18 +2764,23 @@ class DataCenterFabricManager:
             commands.extend([f"bgp {as_number}"])
             for spine_ip, remote_as in zip(peers, peer_ases):
                 commands.extend([
+                    "undo default ipv4-unicast",
                     f"peer {spine_ip} as-number {remote_as}",
                     f"peer {spine_ip} connect-interface LoopBack0",
                     f"peer {spine_ip} ebgp-max-hop 2",
                     f"peer {spine_ip} group spine-leaf-evpn",
+                    "l2vpn-family evpn",
+                    f"peer {spine_ip} enable",
+                    f"peer {spine_ip} advertise-community",
+                    "quit",
                 ])
             # EVPN group enable
-            commands.extend([
-                "l2vpn-family evpn",
-                "peer spine-leaf-evpn enable",
-                "peer spine-leaf-evpn advertise-community",
-                "quit",
-            ])
+          #  commands.extend([
+           #     "l2vpn-family evpn",
+            #    "peer spine-leaf-evpn enable",
+             #   "peer spine-leaf-evpn advertise-community",
+              #  "quit",
+            #])
         else:
             spine_loopbacks = self._get_spine_loopbacks(spine_interfaces)
             commands.extend([f"bgp {as_number}"])
@@ -2777,13 +2793,10 @@ class DataCenterFabricManager:
                     f"peer {spine_ip} connect-interface LoopBack0",
                     f"peer {spine_ip} ebgp-max-hop 2",
                     f"peer {spine_ip} group spine-leaf-evpn",
+                    f"l2vpn-family evpn",
+                    f"peer {spine_ip} enable",
+                    f"peer {spine_ip} advertise-community",
                 ])
-            commands.extend([
-                "l2vpn-family evpn",
-                "peer spine-leaf-evpn enable",
-                "peer spine-leaf-evpn advertise-community",
-                "quit",
-            ])
         
         # Execute in one go to preserve contexts
         return self.device.execute_config_commands(commands)
@@ -2800,15 +2813,20 @@ class DataCenterFabricManager:
         
         commands = [
             # Create EVPN instance
-            f"evpn vpn-instance {tenant_name} bd-mode",
-            f"route-distinguisher auto",
-            f"vpn-target {route_target} export-extcommunity",
-            f"vpn-target {route_target} import-extcommunity",
-            "quit",
+          #  f"evpn vpn-instance {tenant_name} bd-mode",
+           # f"route-distinguisher auto",
+          #  f"vpn-target {route_target} export-extcommunity",
+           # f"vpn-target {route_target} import-extcommunity",
+          #  "quit",
             
             # Create bridge domain
             f"bridge-domain {vlan_id}",
-            f"evpn binding vpn-instance {tenant_name}",
+            f"vxlan vni {vni}",
+            "arp broadcast-suppress enable",
+            "evpn",
+            f"route-distinguisher auto",
+            f"vpn-target {route_target} export-extcommunity",
+            f"vpn-target {route_target} import-extcommunity",
             "quit",
             
             # Create VLAN
@@ -2818,7 +2836,7 @@ class DataCenterFabricManager:
             
             # Configure NVE interface (assuming NVE1 exists)
             "interface Nve1",
-            f"vni {vni} l2-vni {vlan_id}",
+            f"vni {vni} head-end peer-list bgp",
             "quit",
             
             # Create VBDIF for gateway
@@ -2836,8 +2854,11 @@ class DataCenterFabricManager:
                 commands.extend([
                     f"interface {interface}",
                     "portswitch",
-                    "port link-type access",
-                    f"port default vlan {vlan_id}",
+                    "port link-type trunk",
+                    "quit",
+                    f"interface {interface}.{vlan_id} mode l2",
+                    f"encapsulation dot1q {vlan_id}",
+                    f"bridge-domain {vlan_id}",
                     "undo shutdown",
                     "quit"
                 ])
