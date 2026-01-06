@@ -2807,7 +2807,7 @@ class DataCenterFabricManager:
                             route_target: str = None) -> str:
         """Deploy a complete tenant network with EVPN VXLAN."""
         if not route_target:
-            route_target = f"65000:{vni}"
+            route_target = f"10.255.254.0:{vni}"
         
         prefix_length = self._mask_to_prefix(subnet_mask)
         
@@ -2830,9 +2830,9 @@ class DataCenterFabricManager:
             "quit",
             
             # Create VLAN
-            f"vlan {vlan_id}",
-            f"description {tenant_name}_VLAN",
-            "quit",
+           # f"vlan {vlan_id}",
+           # f"description {tenant_name}_VLAN",
+           # "quit",
             
             # Configure NVE interface (assuming NVE1 exists)
             "interface Nve1",
