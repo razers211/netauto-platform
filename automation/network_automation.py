@@ -2950,7 +2950,7 @@ class DataCenterFabricManager:
             
             # Configure NVE interface
             "interface Nve1",
-            f"vni {vni} head-end peer-list bgp",
+            f"vni {vni} head-end peer-list protocol bgp",
             "quit",
             
             # Create VBDIF for gateway
@@ -3170,6 +3170,198 @@ class DataCenterFabricManager:
         
         else:
             raise NetworkAutomationError(f"Unknown device role: {device_role}")
+    
+    def deploy_single_switch_to_fabric(self, fabric_config: dict) -> str:
+        """Deploy a single switch to an existing fabric with proper peer configuration."""
+        from .models import FabricDeployment, Device
+        
+        # Check if validation should be skipped
+        skip_validation = fabric_config.get('skip_validation', False)
+        
+        if not skip_validation:
+            # First validate device connection and basic functionality
+            logger.info("Running device validation (set 'skip_validation': true to bypass)...")
+            if not self._validate_huawei_connection(strict=False):
+                logger.warning("Device validation failed with lenient checks")
+                logger.info("Attempting with minimal validation...")
+                
+                # Try one more basic test
+                try:
+                    result = self.device.execute_command("display version")
+                    if not result or len(result.strip()) < 10:
+                        raise NetworkAutomationError(
+                            "Device validation failed - cannot execute basic commands. "
+                            "Check device connectivity and credentials. "
+                            "You can bypass validation by adding 'skip_validation': true to fabric_config."
+                        )
+                    logger.info("Minimal validation passed, proceeding with configuration...")
+                except Exception as e:
+                    raise NetworkAutomationError(
+                        f"Device validation failed: {e}. "
+                        "You can bypass validation by adding 'skip_validation': true to fabric_config."
+                    )
+            else:
+                logger.info("Device validation passed successfully")
+        else:
+            logger.warning("Device validation SKIPPED - proceeding without validation checks")
+        
+        device_role = fabric_config.get('device_role')  # 'spine' or 'leaf'
+        device_id = fabric_config.get('device_id', 1)
+        as_number = fabric_config.get('as_number', 65000)
+        fabric_name = fabric_config.get('fabric_name')
+        
+        if not fabric_name:
+            raise NetworkAutomationError("fabric_name is required for single switch deployment")
+        
+        # Get fabric deployment record
+        try:
+            fabric_deployment = FabricDeployment.objects.get(fabric_name=fabric_name)
+            logger.info(f"Found existing fabric: {fabric_name}")
+        except FabricDeployment.DoesNotExist:
+            raise NetworkAutomationError(f"Fabric '{fabric_name}' not found. Create fabric first.")
+        
+        # Get current device ID from database
+        current_device_id = fabric_config.get('current_device_id')
+        if not current_device_id:
+            raise NetworkAutomationError("current_device_id is required for fabric tracking")
+        
+        # Generate configuration based on device role
+        if device_role == 'spine':
+            # Use loopback_ip from form, fallback to auto-generated
+            router_id = fabric_config.get('loopback_ip') or f"10.255.255.{device_id}"
+            spine_interfaces = fabric_config.get('spine_interfaces', [])
+            spine_ip_range = fabric_deployment.underlay_ip_range
+            
+            # Get leaf devices from fabric for BGP peering
+            leaf_devices = fabric_deployment.leaf_devices
+            spine_peer_as_numbers = []
+            
+            # Configure spine underlay with peer information
+            result = self.configure_spine_underlay(
+                router_id, as_number, spine_interfaces, spine_ip_range,
+                fabric_config.get('underlay_links', [])
+            )
+            
+            # Update fabric deployment with this spine
+            spine_config = {
+                'device_id': current_device_id,
+                'name': fabric_config.get('device_name', f'spine-{device_id}'),
+                'router_id': router_id,
+                'as_number': as_number,
+                'interfaces': spine_interfaces,
+                'loopback_ip': router_id
+            }
+            
+            # Add or update spine in fabric
+            fabric_deployment.spine_devices = [
+                s for s in fabric_deployment.spine_devices 
+                if s['device_id'] != current_device_id
+            ] + [spine_config]
+            
+        elif device_role == 'leaf' or device_role == 'border_leaf':
+            # Use loopback_ip from form, fallback to auto-generated
+            router_id = fabric_config.get('loopback_ip') or f"10.255.254.{device_id}"
+            # Use spine_interfaces from form (these are uplink interfaces on leaf)
+            spine_interfaces = fabric_config.get('spine_interfaces', [])
+            spine_ip_range = fabric_deployment.underlay_ip_range
+            
+            # Get spine devices from fabric for BGP peering
+            spine_devices = fabric_deployment.spine_devices
+            spine_peer_as_numbers = [s['as_number'] for s in spine_devices]
+            uplink_spine_indices = []
+            
+            # Determine spine indices for uplinks
+            for i, interface in enumerate(spine_interfaces):
+                # Find corresponding spine by interface name pattern or order
+                if i < len(spine_devices):
+                    uplink_spine_indices.append(i + 1)  # Spine indices are 1-based
+            
+            # Configure leaf underlay with spine peer information
+            result = self.configure_leaf_underlay(
+                router_id, as_number, spine_interfaces, device_id, spine_ip_range,
+                spine_peer_as_numbers,
+                uplink_spine_indices,
+                fabric_config.get('underlay_links', [])
+            )
+            
+            # Configure NVE interface
+            nve_config = fabric_config.get('nve_config', {})
+            if nve_config:
+                nve_commands = [
+                    "interface Nve1",
+                    f"source {router_id}",
+                    "undo shutdown",
+                    "quit"
+                ]
+                result += "\n" + self.device.execute_config_commands(nve_commands)
+            
+            # Deploy tenant networks from fabric
+            tenant_networks = fabric_deployment.tenant_networks
+            for tenant in tenant_networks:
+                tenant_result = self.deploy_tenant_network(
+                    tenant['name'],
+                    tenant['vni'],
+                    tenant['vlan_id'],
+                    tenant['gateway_ip'],
+                    tenant['subnet_mask'],
+                    tenant.get('access_interfaces', [])
+                )
+                result += "\n" + tenant_result
+            
+            # Configure external connectivity if this is a border leaf
+            if device_role == 'border_leaf':
+                # For border leaf, configure basic external connectivity
+                external_config = {
+                    'vrf_name': 'EXTERNAL_VRF',
+                    'as_number': as_number,
+                    'rd': 'auto',
+                    'rt': '65000:999'
+                }
+                external_result = self.configure_external_connectivity(external_config)
+                result += "\n\n--- EXTERNAL CONNECTIVITY ---\n" + external_result
+            
+            # Update fabric deployment with this leaf
+            leaf_config = {
+                'device_id': current_device_id,
+                'name': fabric_config.get('device_name', f'leaf-{device_id}'),
+                'router_id': router_id,
+                'as_number': as_number,
+                'interfaces': spine_interfaces,
+                'loopback_ip': router_id,
+                'is_border_leaf': device_role == 'border_leaf'
+            }
+            
+            # Add or update leaf in appropriate list
+            if device_role == 'border_leaf':
+                fabric_deployment.border_leaf_devices = [
+                    bl for bl in fabric_deployment.border_leaf_devices 
+                    if bl['device_id'] != current_device_id
+                ] + [leaf_config]
+            else:
+                fabric_deployment.leaf_devices = [
+                    l for l in fabric_deployment.leaf_devices 
+                    if l['device_id'] != current_device_id
+                ] + [leaf_config]
+        
+        else:
+            raise NetworkAutomationError(f"Unknown device role: {device_role}")
+        
+        # Save fabric deployment updates
+        fabric_deployment.save()
+        
+        # Add configuration summary
+        summary = f"\n\n=== FABRIC DEPLOYMENT SUMMARY ===\n"
+        summary += f"Fabric: {fabric_name}\n"
+        summary += f"Device Role: {device_role}\n"
+        summary += f"Device ID: {device_id}\n"
+        summary += f"Router ID: {router_id}\n"
+        summary += f"AS Number: {as_number}\n"
+        summary += f"Total Spines in Fabric: {len(fabric_deployment.spine_devices)}\n"
+        summary += f"Total Leaves in Fabric: {len(fabric_deployment.leaf_devices)}\n"
+        summary += f"Total Border Leaves in Fabric: {len(fabric_deployment.border_leaf_devices)}\n"
+        summary += f"Total Tenant Networks: {len(fabric_deployment.tenant_networks)}\n"
+        
+        return result + summary
     
     def _calculate_spine_ip(self, ip_range: str, interface_idx: int) -> str:
         """Calculate spine interface IP address."""
@@ -3658,6 +3850,12 @@ def execute_network_task(device_params: Dict, task_type: str, parameters: Dict) 
                 # Pass parameters directly as fabric_config
                 fabric_config = parameters
                 result = manager.deploy_full_fabric_configuration(fabric_config)
+            
+            elif task_type == 'datacenter_fabric_single':
+                manager = DataCenterFabricManager(device)
+                # Pass parameters directly as fabric_config
+                fabric_config = parameters
+                result = manager.deploy_single_switch_to_fabric(fabric_config)
             
             elif task_type == 'spine_underlay':
                 manager = DataCenterFabricManager(device)

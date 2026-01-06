@@ -86,6 +86,9 @@ class NetworkTask(models.Model):
         ('bgp_neighbor_v6', 'Configure BGP Neighbor (IPv6)'),
         ('bgp_network_v6', 'Advertise BGP Network (IPv6)'),
         ('routing_ospf_v6', 'OSPFv3 (IPv6) Configuration'),
+        ('datacenter_fabric', 'Deploy Full Fabric'),
+        ('datacenter_fabric_single', 'Deploy Single Switch to Fabric'),
+        ('multi_tenant_deployment', 'Multi-Tenant Deployment'),
     ]
     
     STATUS_CHOICES = [
@@ -130,3 +133,55 @@ class TaskResult(models.Model):
     
     def __str__(self):
         return f"Result for {self.task}"
+
+
+class FabricDeployment(models.Model):
+    """Track datacenter fabric deployments and their member switches."""
+    FABRIC_STATUS = [
+        ('building', 'Building'),
+        ('active', 'Active'),
+        ('updating', 'Updating'),
+        ('decommissioned', 'Decommissioned'),
+    ]
+    
+    fabric_name = models.CharField(max_length=50, unique=True)
+    description = models.TextField(blank=True)
+    status = models.CharField(max_length=20, choices=FABRIC_STATUS, default='building')
+    underlay_ip_range = models.CharField(max_length=50, default='10.0.0.0/30')
+    as_number = models.IntegerField(default=65000)
+    created_by = models.ForeignKey(User, on_delete=models.CASCADE)
+    created_at = models.DateTimeField(auto_now_add=True)
+    updated_at = models.DateTimeField(auto_now=True)
+    
+    # JSON fields for fabric topology
+    spine_devices = models.JSONField(default=list, help_text="List of spine device IDs and configs")
+    leaf_devices = models.JSONField(default=list, help_text="List of leaf device IDs and configs")
+    border_leaf_devices = models.JSONField(default=list, help_text="List of border leaf device IDs and configs")
+    tenant_networks = models.JSONField(default=list, help_text="Tenant networks deployed in this fabric")
+    
+    class Meta:
+        ordering = ['-created_at']
+    
+    def __str__(self):
+        return f"Fabric: {self.fabric_name} ({self.get_status_display()})"
+    
+    def get_all_devices(self):
+        """Get all device IDs in this fabric."""
+        all_devices = []
+        all_devices.extend([d['device_id'] for d in self.spine_devices])
+        all_devices.extend([d['device_id'] for d in self.leaf_devices])
+        all_devices.extend([d['device_id'] for d in self.border_leaf_devices])
+        return list(set(all_devices))
+    
+    def get_device_role(self, device_id):
+        """Get the role of a device in this fabric."""
+        for device in self.spine_devices:
+            if device['device_id'] == device_id:
+                return 'spine'
+        for device in self.leaf_devices:
+            if device['device_id'] == device_id:
+                return 'leaf'
+        for device in self.border_leaf_devices:
+            if device['device_id'] == device_id:
+                return 'border_leaf'
+        return None

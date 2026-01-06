@@ -735,6 +735,12 @@ class DataCenterFabricForm(forms.Form):
         ('border_leaf', 'Border Leaf (External Connectivity)')
     ]
     
+    fabric_name = forms.CharField(
+        max_length=50,
+        widget=forms.TextInput(attrs={'class': 'form-control', 'placeholder': 'DC1_FABRIC'}),
+        help_text='Name of the fabric to add this device to'
+    )
+    
     device_role = forms.ChoiceField(
         choices=DEVICE_ROLE_CHOICES,
         widget=forms.Select(attrs={'class': 'form-control'}),

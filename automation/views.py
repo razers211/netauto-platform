@@ -1461,14 +1461,17 @@ def datacenter_fabric(request):
             # Create network task
             task = NetworkTask.objects.create(
                 device=device,
-                task_type='datacenter_fabric',
+                task_type='datacenter_fabric_single',
                 parameters={
+                    'fabric_name': form.cleaned_data.get('fabric_name', 'DefaultFabric'),
                     'device_role': form.cleaned_data['device_role'],
                     'device_id': form.cleaned_data['device_id'],
+                    'current_device_id': device.id,  # Track actual device ID
                     'as_number': form.cleaned_data['as_number'],
                     'loopback_ip': form.cleaned_data.get('loopback_ip'),
                     'underlay_ip_range': form.cleaned_data['underlay_ip_range'],
-                    'spine_interfaces': interfaces
+                    'spine_interfaces': interfaces,
+                    'device_name': device.name  # Add device name for fabric tracking
                 },
                 created_by=request.user
             )

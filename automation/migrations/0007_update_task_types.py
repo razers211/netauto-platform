@@ -1,0 +1,66 @@
+# Generated migration to add new task types
+
+from django.db import migrations
+
+
+class Migration(migrations.Migration):
+
+    dependencies = [
+        ('automation', '0006_fabricdeployment'),
+    ]
+
+    operations = [
+        migrations.AlterField(
+            model_name='networktask',
+            name='task_type',
+            field=models.CharField(
+                choices=[
+                    ('vlan_create', 'Create VLAN'),
+                    ('vlan_delete', 'Delete VLAN'),
+                    ('vlan_interface_config', 'Configure VLAN Interface'),
+                    ('interface_config', 'Configure Interface'),
+                    ('routing_static', 'Static Route'),
+                    ('routing_ospf', 'OSPF Configuration'),
+                    ('vrf_create', 'Create VRF'),
+                    ('vrf_delete', 'Delete VRF'),
+                    ('vrf_interface', 'Assign VRF to Interface'),
+                    ('bgp_neighbor', 'Configure BGP Neighbor'),
+                    ('bgp_network', 'Advertise BGP Network'),
+                    ('bgp_vrf', 'Configure BGP for VRF'),
+                    ('bgp_route_reflector', 'Configure BGP Route Reflector'),
+                    ('bgp_confederation', 'Configure BGP Confederation'),
+                    ('bgp_multipath', 'Configure BGP Multipath'),
+                    ('ospf_area', 'Configure OSPF Area'),
+                    ('ospf_authentication', 'Configure OSPF Authentication'),
+                    ('evpn_instance', 'Configure EVPN Instance'),
+                    ('bgp_evpn', 'Configure BGP EVPN'),
+                    ('vxlan_tunnel', 'Configure VXLAN Tunnel'),
+                    ('nve_interface', 'Configure NVE Interface'),
+                    ('vxlan_gateway', 'Configure VXLAN Gateway'),
+                    ('vxlan_access_port', 'Configure VXLAN Access Port'),
+                    ('show_version', 'Show Version'),
+                    ('show_interfaces', 'Show Interfaces'),
+                    ('show_vlan', 'Show VLANs'),
+                    ('show_routes', 'Show Routes'),
+                    ('show_vrf', 'Show VRFs'),
+                    ('show_bgp', 'Show BGP Summary'),
+                    ('backup_config', 'Backup Configuration'),
+                    ('ae_config', 'Configure AE Interface'),
+                    ('l2vpws', 'L2VPWS Instance'),
+                    ('l2vpn_vpls', 'L2VPN VPLS Instance'),
+                    ('bridge_domain', 'Bridge Domain Configuration'),
+                    ('huawei_eth_trunk', 'Huawei Eth-Trunk (M-LAG)'),
+                    ('interface_ipv6', 'Configure Interface IPv6'),
+                    ('vlan_interface_ipv6', 'Configure VLAN Interface IPv6'),
+                    ('routing_static_v6', 'Static Route IPv6'),
+                    ('bgp_neighbor_v6', 'Configure BGP Neighbor (IPv6)'),
+                    ('bgp_network_v6', 'Advertise BGP Network (IPv6)'),
+                    ('routing_ospf_v6', 'OSPFv3 (IPv6) Configuration'),
+                    ('datacenter_fabric', 'Deploy Full Fabric'),
+                    ('datacenter_fabric_single', 'Deploy Single Switch to Fabric'),
+                    ('multi_tenant_deployment', 'Multi-Tenant Deployment'),
+                ],
+                max_length=30
+            ),
+        ),
+    ]

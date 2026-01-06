@@ -15,7 +15,8 @@ import environ
 
 # Environment configuration
 env = environ.Env(
-    DJANGO_DEBUG=(bool, False)
+    DJANGO_DEBUG=(bool, False),
+    DEBUG=(bool, False)  # Add DEBUG with default value
 )
 
 # Build paths inside the project like this: BASE_DIR / 'subdir'.
