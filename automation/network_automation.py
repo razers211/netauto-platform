@@ -8,6 +8,7 @@ from netmiko import ConnectHandler, NetmikoTimeoutException, NetmikoAuthenticati
 from typing import Dict, List, Optional, Tuple
 import re
 from functools import wraps
+from django.utils import timezone
 try:
     from .juniper_manager import JuniperDeviceManager
 except ImportError:
@@ -2728,6 +2729,9 @@ class DataCenterFabricManager:
             "interface LoopBack0",
             f"ip address {router_id} 255.255.255.255",
             "undo shutdown",
+            "quit",
+            "interface nve1",
+            f"source {router_id}",
             "quit"
         ])
         
@@ -2855,7 +2859,7 @@ class DataCenterFabricManager:
                     "port link-type trunk",
                     "quit",
                     f"interface {interface}.{vlan_id} mode l2",
-                    f"encapsulation dot1q {vlan_id}",
+                    f"encapsulation dot1q vid {vlan_id}",
                     f"bridge-domain {vlan_id}",
                     "undo shutdown",
                     "quit"
@@ -2969,7 +2973,7 @@ class DataCenterFabricManager:
                     "port link-type trunk",
                     "quit",
                     f"interface {interface}.{vlan_id} mode l2",
-                    f"encapsulation dot1q {vlan_id}",
+                    f"encapsulation dot1q vid {vlan_id}",
                     f"bridge-domain {vlan_id}",
                     "undo shutdown",
                     "quit"
@@ -3069,6 +3073,8 @@ class DataCenterFabricManager:
     
     def deploy_full_fabric_configuration(self, fabric_config: dict) -> str:
         """Deploy complete datacenter fabric with all tenant networks."""
+        from .models import FabricDeployment, Device
+        
         # Check if validation should be skipped
         skip_validation = fabric_config.get('skip_validation', False)
         
@@ -3102,16 +3108,84 @@ class DataCenterFabricManager:
         device_role = fabric_config.get('device_role')  # 'spine' or 'leaf'
         device_id = fabric_config.get('device_id', 1)
         as_number = fabric_config.get('as_number', 65000)
+        fabric_name = fabric_config.get('fabric_name', 'DefaultFabric')
+        current_device_id = fabric_config.get('current_device_id')
+        
+        logger.info(f"Full fabric deployment: {device_role} ID {device_id} for fabric {fabric_name}")
+        
+        # Get or create fabric deployment record
+        try:
+            fabric_deployment = FabricDeployment.objects.get(fabric_name=fabric_name)
+            logger.info(f"Found existing fabric: {fabric_name}")
+        except FabricDeployment.DoesNotExist:
+            logger.info(f"Fabric '{fabric_name}' not found, creating new fabric...")
+            # Create new fabric deployment if it doesn't exist
+            from django.contrib.auth.models import User
+            system_user = User.objects.first()
+            fabric_deployment = FabricDeployment.objects.create(
+                fabric_name=fabric_name,
+                description=f"Auto-created fabric for {fabric_name}",
+                status='building',
+                underlay_ip_range=fabric_config.get('underlay_ip_range', '10.0.0.0/30'),
+                as_number=fabric_config.get('as_number', 65000),
+                created_by=system_user
+            )
+        
+        # Get current device from database
+        if not current_device_id:
+            logger.warning("No current_device_id provided, fabric tracking disabled")
+            # Fallback: deploy without fabric tracking
+            return self._fallback_single_switch_deployment(fabric_config)
+        
+        try:
+            current_device = Device.objects.get(id=current_device_id)
+        except Device.DoesNotExist:
+            logger.warning(f"Device with ID {current_device_id} not found, fabric tracking disabled")
+            # Fallback: deploy without fabric tracking
+            return self._fallback_single_switch_deployment(fabric_config)
+        
+        result = ""
         
         if device_role == 'spine':
             # Use loopback_ip from form, fallback to auto-generated
             router_id = fabric_config.get('loopback_ip') or f"10.255.255.{device_id}"
             spine_interfaces = fabric_config.get('spine_interfaces', [])
             spine_ip_range = fabric_config.get('underlay_ip_range', '10.0.0.0/30')
-            return self.configure_spine_underlay(
+            result = self.configure_spine_underlay(
                 router_id, as_number, spine_interfaces, spine_ip_range,
                 fabric_config.get('underlay_links')
             )
+            
+            # Update fabric deployment with this spine
+            try:
+                spine_devices = fabric_deployment.spine_devices or []
+                logger.info(f"Current spine devices: {spine_devices}")
+                
+                # Check if device already exists
+                device_exists = False
+                for d in spine_devices:
+                    if isinstance(d, dict) and d.get('id') == current_device.id:
+                        device_exists = True
+                        break
+                
+                if not device_exists:
+                    spine_devices = spine_devices.copy()
+                    new_spine = {
+                        'id': current_device.id,
+                        'name': current_device.name,
+                        'device_id': device_id,
+                        'router_id': router_id,
+                        'configured_at': timezone.now().isoformat()
+                    }
+                    spine_devices.append(new_spine)
+                    fabric_deployment.spine_devices = spine_devices
+                    logger.info(f"Added spine {current_device.name} to fabric: {new_spine}")
+                else:
+                    logger.info(f"Spine {current_device.name} already exists in fabric")
+            except Exception as e:
+                logger.error(f"Error updating spine devices: {e}")
+                import traceback
+                traceback.print_exc()
         
         elif device_role == 'leaf' or device_role == 'border_leaf':
             # Use loopback_ip from form, fallback to auto-generated
@@ -3139,6 +3213,64 @@ class DataCenterFabricManager:
                 ]
                 result += "\n" + self.device.execute_config_commands(nve_commands)
             
+            # Update fabric deployment with this leaf
+            try:
+                if device_role == 'leaf':
+                    leaf_devices = fabric_deployment.leaf_devices or []
+                    logger.info(f"Current leaf devices: {leaf_devices}")
+                    
+                    # Check if device already exists
+                    device_exists = False
+                    for d in leaf_devices:
+                        if isinstance(d, dict) and d.get('id') == current_device.id:
+                            device_exists = True
+                            break
+                    
+                    if not device_exists:
+                        leaf_devices = leaf_devices.copy()
+                        new_leaf = {
+                            'id': current_device.id,
+                            'name': current_device.name,
+                            'device_id': device_id,
+                            'router_id': router_id,
+                            'configured_at': timezone.now().isoformat()
+                        }
+                        leaf_devices.append(new_leaf)
+                        fabric_deployment.leaf_devices = leaf_devices
+                        logger.info(f"Added leaf {current_device.name} to fabric: {new_leaf}")
+                    else:
+                        logger.info(f"Leaf {current_device.name} already exists in fabric")
+                        
+                else:  # border_leaf
+                    border_leaf_devices = fabric_deployment.border_leaf_devices or []
+                    logger.info(f"Current border leaf devices: {border_leaf_devices}")
+                    
+                    # Check if device already exists
+                    device_exists = False
+                    for d in border_leaf_devices:
+                        if isinstance(d, dict) and d.get('id') == current_device.id:
+                            device_exists = True
+                            break
+                    
+                    if not device_exists:
+                        border_leaf_devices = border_leaf_devices.copy()
+                        new_border_leaf = {
+                            'id': current_device.id,
+                            'name': current_device.name,
+                            'device_id': device_id,
+                            'router_id': router_id,
+                            'configured_at': timezone.now().isoformat()
+                        }
+                        border_leaf_devices.append(new_border_leaf)
+                        fabric_deployment.border_leaf_devices = border_leaf_devices
+                        logger.info(f"Added border leaf {current_device.name} to fabric: {new_border_leaf}")
+                    else:
+                        logger.info(f"Border leaf {current_device.name} already exists in fabric")
+            except Exception as e:
+                logger.error(f"Error updating leaf/border leaf devices: {e}")
+                import traceback
+                traceback.print_exc()
+            
             # Deploy tenant networks
             tenant_networks = fabric_config.get('tenant_networks', [])
             for tenant in tenant_networks:
@@ -3151,6 +3283,38 @@ class DataCenterFabricManager:
                     tenant.get('access_interfaces', [])
                 )
                 result += "\n" + tenant_result
+                
+                # Update fabric deployment with tenant network
+                try:
+                    tenant_networks_list = fabric_deployment.tenant_networks or []
+                    logger.info(f"Current tenant networks: {tenant_networks_list}")
+                    
+                    # Check if tenant network already exists
+                    network_exists = False
+                    for t in tenant_networks_list:
+                        if isinstance(t, dict) and t.get('vni') == tenant['vni']:
+                            network_exists = True
+                            break
+                    
+                    if not network_exists:
+                        tenant_networks_list = tenant_networks_list.copy()
+                        new_tenant = {
+                            'name': tenant['name'],
+                            'vni': tenant['vni'],
+                            'vlan_id': tenant['vlan_id'],
+                            'gateway_ip': tenant['gateway_ip'],
+                            'subnet_mask': tenant['subnet_mask'],
+                            'created_at': timezone.now().isoformat()
+                        }
+                        tenant_networks_list.append(new_tenant)
+                        fabric_deployment.tenant_networks = tenant_networks_list
+                        logger.info(f"Added tenant network {tenant['name']} to fabric: {new_tenant}")
+                    else:
+                        logger.info(f"Tenant network {tenant['name']} already exists in fabric")
+                except Exception as e:
+                    logger.error(f"Error updating tenant networks: {e}")
+                    import traceback
+                    traceback.print_exc()
             
             # Configure external connectivity if this is a border leaf
             if device_role == 'border_leaf':
@@ -3163,15 +3327,31 @@ class DataCenterFabricManager:
                 }
                 external_result = self.configure_external_connectivity(external_config)
                 result += "\n\n--- EXTERNAL CONNECTIVITY ---\n" + external_result
-            
-            return result
         
-        else:
-            raise NetworkAutomationError(f"Unknown device role: {device_role}")
+        # Save fabric deployment with all updates
+        fabric_deployment.save()
+        logger.info(f"Saved fabric deployment {fabric_name} with all device updates")
+        
+        # Add deployment summary
+        summary = f"\n\n=== FABRIC DEPLOYMENT SUMMARY ===\n"
+        summary += f"Fabric Name: {fabric_name}\n"
+        summary += f"Device Role: {device_role}\n"
+        summary += f"Device Name: {current_device.name}\n"
+        summary += f"Device ID: {device_id}\n"
+        summary += f"Router ID: {router_id}\n"
+        summary += f"AS Number: {as_number}\n"
+        summary += f"Total Spines in Fabric: {len(fabric_deployment.spine_devices)}\n"
+        summary += f"Total Leaves in Fabric: {len(fabric_deployment.leaf_devices)}\n"
+        summary += f"Total Border Leaves in Fabric: {len(fabric_deployment.border_leaf_devices)}\n"
+        summary += f"Total Tenant Networks: {len(fabric_deployment.tenant_networks)}\n"
+        
+        return result + summary
     
     def deploy_single_switch_to_fabric(self, fabric_config: dict) -> str:
         """Deploy a single switch to an existing fabric with proper peer configuration."""
         from .models import FabricDeployment, Device
+        
+        logger.info(f"Starting single switch deployment with config: {fabric_config}")
         
         # Check if validation should be skipped
         skip_validation = fabric_config.get('skip_validation', False)
@@ -3208,6 +3388,8 @@ class DataCenterFabricManager:
         as_number = fabric_config.get('as_number', 65000)
         fabric_name = fabric_config.get('fabric_name')
         
+        logger.info(f"Device role: {device_role}, Device ID: {device_id}, AS: {as_number}, Fabric: {fabric_name}")
+        
         if not fabric_name:
             raise NetworkAutomationError("fabric_name is required for single switch deployment")
         
@@ -3216,7 +3398,24 @@ class DataCenterFabricManager:
             fabric_deployment = FabricDeployment.objects.get(fabric_name=fabric_name)
             logger.info(f"Found existing fabric: {fabric_name}")
         except FabricDeployment.DoesNotExist:
-            raise NetworkAutomationError(f"Fabric '{fabric_name}' not found. Create fabric first.")
+            logger.info(f"Fabric '{fabric_name}' not found, creating new fabric...")
+            # Create new fabric deployment if it doesn't exist
+            from django.contrib.auth.models import User
+            # Get first user or create a system user
+            system_user = User.objects.first()
+            fabric_deployment = FabricDeployment.objects.create(
+                fabric_name=fabric_name,
+                description=f"Auto-created fabric for {fabric_name}",
+                status='building',
+                underlay_ip_range=fabric_config.get('underlay_ip_range', '10.0.0.0/30'),
+                as_number=fabric_config.get('as_number', 65000),
+                created_by=system_user
+            )
+        except Exception as e:
+            logger.error(f"Error with fabric deployment: {e}")
+            # Fallback: Create a simple deployment without fabric tracking
+            logger.info("Using fallback deployment without fabric tracking...")
+            return self._fallback_single_switch_deployment(fabric_config)
         
         # Get current device ID from database
         current_device_id = fabric_config.get('current_device_id')
@@ -3361,6 +3560,48 @@ class DataCenterFabricManager:
         
         return result + summary
     
+    def _fallback_single_switch_deployment(self, fabric_config: dict) -> str:
+        """Fallback deployment method that works without fabric tracking."""
+        device_role = fabric_config.get('device_role', 'leaf')
+        device_id = fabric_config.get('device_id', 1)
+        as_number = fabric_config.get('as_number', 65000)
+        router_id = fabric_config.get('loopback_ip') or f"10.255.255.{device_id}"
+        spine_interfaces = fabric_config.get('spine_interfaces', [])
+        underlay_ip_range = fabric_config.get('underlay_ip_range', '10.0.0.0/30')
+        
+        logger.info(f"Fallback deployment: {device_role} with {len(spine_interfaces)} interfaces")
+        
+        # Generate configuration based on device role
+        if device_role == 'spine':
+            result = self.configure_spine_underlay(
+                router_id, as_number, spine_interfaces, underlay_ip_range
+            )
+        elif device_role == 'leaf' or device_role == 'border_leaf':
+            result = self.configure_leaf_underlay(
+                router_id, as_number, spine_interfaces, device_id, underlay_ip_range
+            )
+            
+            # Configure NVE interface
+            nve_commands = [
+                "interface Nve1",
+                f"source {router_id}",
+                "undo shutdown",
+                "quit"
+            ]
+            result += "\n" + self.device.execute_config_commands(nve_commands)
+        else:
+            raise NetworkAutomationError(f"Unknown device role: {device_role}")
+        
+        # Add fallback summary
+        summary = f"\n\n=== FALLBACK DEPLOYMENT SUMMARY ===\n"
+        summary += f"Device Role: {device_role}\n"
+        summary += f"Device ID: {device_id}\n"
+        summary += f"Router ID: {router_id}\n"
+        summary += f"AS Number: {as_number}\n"
+        summary += "Note: Fabric tracking disabled - using fallback mode\n"
+        
+        return result + summary
+    
     def _calculate_spine_ip(self, ip_range: str, interface_idx: int) -> str:
         """Calculate spine interface IP address."""
         # Simple IP calculation - in production, use proper IP addressing library
@@ -3415,6 +3656,10 @@ def execute_network_task(device_params: Dict, task_type: str, parameters: Dict) 
     Returns:
         Tuple of (success: bool, result: str, error_message: str)
     """
+    print(f"DEBUG: execute_network_task called with task_type='{task_type}'")
+    print(f"DEBUG: device_params: {device_params}")
+    print(f"DEBUG: parameters: {parameters}")
+    
     start_time = time.time()
     
     try:
@@ -3850,10 +4095,20 @@ def execute_network_task(device_params: Dict, task_type: str, parameters: Dict) 
                 result = manager.deploy_full_fabric_configuration(fabric_config)
             
             elif task_type == 'datacenter_fabric_single':
-                manager = DataCenterFabricManager(device)
-                # Pass parameters directly as fabric_config
-                fabric_config = parameters
-                result = manager.deploy_single_switch_to_fabric(fabric_config)
+                print(f"DEBUG: EXECUTING datacenter_fabric_single task")
+                print(f"DEBUG: Parameters: {parameters}")
+                try:
+                    manager = DataCenterFabricManager(device)
+                    # Pass parameters directly as fabric_config
+                    fabric_config = parameters
+                    print(f"DEBUG: About to call deploy_single_switch_to_fabric")
+                    result = manager.deploy_single_switch_to_fabric(fabric_config)
+                    print(f"DEBUG: deploy_single_switch_to_fabric completed successfully")
+                except Exception as e:
+                    print(f"DEBUG: ERROR in deploy_single_switch_to_fabric: {e}")
+                    import traceback
+                    traceback.print_exc()
+                    raise
             
             elif task_type == 'spine_underlay':
                 manager = DataCenterFabricManager(device)

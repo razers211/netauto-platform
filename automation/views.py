@@ -211,21 +211,27 @@ def execute_task_async(task):
     logger = logging.getLogger(__name__)
     
     logger.info(f"Starting async execution for task {task.id}: {task.task_type}")
+    print(f"ASYNC DEBUG: Starting execution for task {task.id}: {task.task_type}")
+    print(f"ASYNC DEBUG: Task parameters: {task.parameters}")
+    
     task.status = 'running'
     task.started_at = timezone.now()
     task.save()
     
     try:
+        print(f"ASYNC DEBUG: About to call execute_network_task")
         success, result, error = execute_network_task(
             task.device.get_connection_params(),
             task.task_type,
             task.parameters
         )
+        print(f"ASYNC DEBUG: execute_network_task returned: success={success}")
         
         task.completed_at = timezone.now()
         if success:
             task.status = 'completed'
             task.result = result
+            print(f"ASYNC DEBUG: Task completed successfully")
             
             # Create task result
             TaskResult.objects.create(
@@ -248,6 +254,9 @@ def execute_task_async(task):
         task.save()
         
     except Exception as e:
+        print(f"ASYNC DEBUG: EXCEPTION in execute_task_async: {e}")
+        import traceback
+        traceback.print_exc()
         task.status = 'failed'
         task.error_message = str(e)
         task.completed_at = timezone.now()
@@ -1458,6 +1467,11 @@ def datacenter_fabric(request):
             interfaces_text = form.cleaned_data.get('spine_interfaces', '')
             interfaces = [iface.strip() for iface in interfaces_text.split('\n') if iface.strip()]
             
+            # Debug logging
+            print(f"DEBUG: Form data: {form.cleaned_data}")
+            print(f"DEBUG: Device: {device}")
+            print(f"DEBUG: Interfaces: {interfaces}")
+            
             # Create network task
             task = NetworkTask.objects.create(
                 device=device,
@@ -1476,12 +1490,22 @@ def datacenter_fabric(request):
                 created_by=request.user
             )
             
+            print(f"DEBUG: Created task {task.id} for device {device.name}")
+            
             # Execute task asynchronously
+            print(f"ASYNC DEBUG: About to start thread for task {task.id}")
             thread = threading.Thread(target=execute_task_async, args=(task,))
             thread.start()
+            print(f"ASYNC DEBUG: Thread started for task {task.id}")
             
             messages.success(request, f'Datacenter Fabric deployment task submitted for {device.name}')
             return redirect('task_detail', task_id=task.id)
+        else:
+            print(f"DEBUG: Form validation failed!")
+            print(f"DEBUG: Form errors: {form.errors}")
+            print(f"DEBUG: Device form errors: {device_form.errors}")
+            print(f"DEBUG: Form is_valid: {form.is_valid()}")
+            print(f"DEBUG: Device form is_valid: {device_form.is_valid()}")
     else:
         form = DataCenterFabricForm()
         device_form = DeviceSelectionForm()
@@ -1987,8 +2011,10 @@ def full_fabric_deploy(request):
 
                 # Base params common to all roles
                 fabric_params = {
+                    'fabric_name': form.cleaned_data.get('fabric_name', 'DefaultFabric'),
                     'device_role': entry['role'],
                     'device_id': entry['device_id'],
+                    'current_device_id': dev_obj.id,  # Add current device ID for tracking
                     'as_number': entry['as_number'],  # per-device AS number
                     'loopback_ip': entry.get('loopback_ip') or None,
                     'underlay_ip_range': underlay_range,
